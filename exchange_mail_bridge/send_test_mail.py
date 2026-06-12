@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timezone
 
 from exchangelib import Mailbox, Message
@@ -45,20 +44,31 @@ def main() -> None:
 
     message = Message(
         account=account,
-        folder=account.sent,
+        folder=account.inbox if is_create_inbox_item() else account.sent,
         subject=subject,
         body=body,
         to_recipients=[Mailbox(email_address=to_address)],
     )
-    message.send_and_save()
+    if is_create_inbox_item():
+        message.save()
+        action = "created in inbox"
+    else:
+        message.send_and_save()
+        action = "sent via EWS"
+
     print(
         {
             "ok": True,
             "to": to_address,
             "subject": subject,
-            "note": "Test mail sent via EWS. No Apps Script post and no auto reply triggered by this workflow.",
+            "action": action,
+            "note": "No Apps Script post and no auto reply triggered by this workflow.",
         }
     )
+
+
+def is_create_inbox_item() -> bool:
+    return env("TEST_MAIL_CREATE_INBOX_ITEM").lower() in {"1", "true", "yes", "y", "on"}
 
 
 if __name__ == "__main__":
