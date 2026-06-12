@@ -15,6 +15,16 @@ Dieses Repo benutzt bewusst dieselben Secret-Namen wie das funktionierende Aussc
 
 Dadurch bleibt die Logik exakt gleich. Die Werte in diesem Repo gehoeren aber zur Mailbox `aufschaltungen.berlin@sicherheit-nord.de`.
 
+Fallback ohne EWS-Zugriff auf das Aufschaltungs-Postfach:
+
+- Im Aufschaltungs-Postfach werden nur relevante Ajax-Aufschaltungs-Mails an `matteo.merkle@sicherheit-nord.de` weitergeleitet.
+- Dieses Repo kann dann mit den funktionierenden Matteo-EWS-Zugangsdaten lesen:
+  - `EWS_EMAIL=matteo.merkle@sicherheit-nord.de`
+  - `EWS_USERNAME=matteo.merkle@sicherheit-nord.de`
+- Damit nicht alle Matteo-Mails verarbeitet werden, filtert der Workflow zusaetzlich ueber:
+  - `MAIL_INCLUDE_REGEX`
+  - optional `MAIL_EXCLUDE_REGEX`
+
 Workflow:
 
 - `.github/workflows/exchange-mail-bridge.yml`

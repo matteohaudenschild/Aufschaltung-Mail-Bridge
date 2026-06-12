@@ -84,20 +84,46 @@ def fetch_messages(account: Account, lookback_minutes: int, top: int) -> List[Di
     include_body_html = parse_bool(env("INCLUDE_BODY_HTML"), default=True)
     max_attachment_bytes = int(env("MAX_ATTACHMENT_BYTES", "2500000"))
     max_body_html_chars = int(env("MAX_BODY_HTML_CHARS", "200000"))
+    scan_top = int(env("MAIL_SCAN_TOP", str(top)))
     items = (
         account.inbox.filter(datetime_received__gte=cutoff)
-        .order_by("-datetime_received")[:top]
+        .order_by("-datetime_received")[:scan_top]
     )
-    return [
-        serialize_item(
+    messages = []
+    for item in items:
+        message = serialize_item(
             item,
             include_attachments=include_attachments,
             include_body_html=include_body_html,
             max_attachment_bytes=max_attachment_bytes,
             max_body_html_chars=max_body_html_chars,
         )
-        for item in items
-    ]
+        if message_matches_filters(message):
+            messages.append(message)
+        if len(messages) >= top:
+            break
+    return messages
+
+
+def message_matches_filters(message: Dict[str, Any]) -> bool:
+    include_regex = env("MAIL_INCLUDE_REGEX")
+    exclude_regex = env("MAIL_EXCLUDE_REGEX")
+    text = "\n".join(
+        [
+            str(message.get("fromName", "") or ""),
+            str(message.get("fromEmail", "") or ""),
+            str(message.get("subject", "") or ""),
+            str(message.get("bodyPreview", "") or ""),
+            str(message.get("bodyTextFull", "") or ""),
+            "\n".join(message.get("bodyLinks", []) or []),
+        ]
+    )
+
+    if include_regex and not re.search(include_regex, text, flags=re.IGNORECASE | re.DOTALL):
+        return False
+    if exclude_regex and re.search(exclude_regex, text, flags=re.IGNORECASE | re.DOTALL):
+        return False
+    return True
 
 
 def serialize_item(

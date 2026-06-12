@@ -11,6 +11,10 @@ on:
         description: "Maximum messages to import"
         required: false
         default: "30"
+      mail_scan_top:
+        description: "Maximum recent messages to scan before filters"
+        required: false
+        default: "200"
       include_attachments:
         description: "Download image attachments into Google Drive"
         required: false
@@ -49,6 +53,9 @@ jobs:
       BRIDGE_TOKEN: ${{ secrets.BRIDGE_TOKEN }}
       MAIL_LOOKBACK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.lookback_minutes || '360' }}
       MAIL_TOP: ${{ github.event_name == 'workflow_dispatch' && inputs.mail_top || '50' }}
+      MAIL_SCAN_TOP: ${{ github.event_name == 'workflow_dispatch' && inputs.mail_scan_top || '200' }}
+      MAIL_INCLUDE_REGEX: ${{ secrets.MAIL_INCLUDE_REGEX }}
+      MAIL_EXCLUDE_REGEX: ${{ secrets.MAIL_EXCLUDE_REGEX }}
       INCLUDE_ATTACHMENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.include_attachments || 'true' }}
       MAX_ATTACHMENT_BYTES: ${{ github.event_name == 'workflow_dispatch' && inputs.max_attachment_bytes || '2500000' }}
       INCLUDE_BODY_HTML: ${{ github.event_name == 'workflow_dispatch' && inputs.include_body_html || 'true' }}
