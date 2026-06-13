@@ -46,6 +46,10 @@ def parse_bool(value: str, default: bool = True) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def parse_email_allowlist(value: str) -> List[str]:
+    return [part.strip().lower() for part in value.split(",") if part.strip()]
+
+
 def auth_type_from_env() -> str:
     auth_type = env("EWS_AUTH_TYPE", "NTLM").upper()
     if auth_type == "BASIC":
@@ -106,8 +110,14 @@ def fetch_messages(account: Account, lookback_minutes: int, top: int) -> List[Di
 
 
 def message_matches_filters(message: Dict[str, Any]) -> bool:
+    allowed_from_emails = parse_email_allowlist(env("MAIL_FROM_EMAIL_ALLOWLIST"))
     include_regex = env("MAIL_INCLUDE_REGEX")
     exclude_regex = env("MAIL_EXCLUDE_REGEX")
+    from_email = str(message.get("fromEmail", "") or "").strip().lower()
+
+    if allowed_from_emails and from_email not in allowed_from_emails:
+        return False
+
     text = "\n".join(
         [
             str(message.get("fromName", "") or ""),

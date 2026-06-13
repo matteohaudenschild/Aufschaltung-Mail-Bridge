@@ -54,6 +54,7 @@ jobs:
       MAIL_LOOKBACK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.lookback_minutes || '360' }}
       MAIL_TOP: ${{ github.event_name == 'workflow_dispatch' && inputs.mail_top || '50' }}
       MAIL_SCAN_TOP: ${{ github.event_name == 'workflow_dispatch' && inputs.mail_scan_top || '200' }}
+      MAIL_FROM_EMAIL_ALLOWLIST: ${{ secrets.MAIL_FROM_EMAIL_ALLOWLIST }}
       MAIL_INCLUDE_REGEX: ${{ secrets.MAIL_INCLUDE_REGEX }}
       MAIL_EXCLUDE_REGEX: ${{ secrets.MAIL_EXCLUDE_REGEX }}
       INCLUDE_ATTACHMENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.include_attachments || 'true' }}
