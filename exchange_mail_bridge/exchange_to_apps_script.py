@@ -24,6 +24,11 @@ from exchangelib.protocol import BaseProtocol, NoVerifyHTTPAdapter
 
 
 DEFAULT_EWS_URL = "https://mail.wackerhagengruppe.de/EWS/Exchange.asmx"
+DEFAULT_AUFSCHALTUNG_INCLUDE_REGEX = (
+    r"NSL[-\s]?Aufschaltungsanfrage"
+    r"|Von:\s*Ajax Team"
+    r"|E-?Mail-Adresse\s*:.*Telefonnummer\s*:.*Name\s*:"
+)
 
 
 def env(name: str, default: str = "") -> str:
@@ -111,12 +116,9 @@ def fetch_messages(account: Account, lookback_minutes: int, top: int) -> List[Di
 
 def message_matches_filters(message: Dict[str, Any]) -> bool:
     allowed_from_emails = parse_email_allowlist(env("MAIL_FROM_EMAIL_ALLOWLIST"))
-    include_regex = env("MAIL_INCLUDE_REGEX")
+    include_regex = env("MAIL_INCLUDE_REGEX", DEFAULT_AUFSCHALTUNG_INCLUDE_REGEX)
     exclude_regex = env("MAIL_EXCLUDE_REGEX")
     from_email = str(message.get("fromEmail", "") or "").strip().lower()
-
-    if allowed_from_emails and from_email not in allowed_from_emails:
-        return False
 
     text = "\n".join(
         [
@@ -129,7 +131,16 @@ def message_matches_filters(message: Dict[str, Any]) -> bool:
         ]
     )
 
-    if include_regex and not re.search(include_regex, text, flags=re.IGNORECASE | re.DOTALL):
+    include_matches = True
+    if include_regex:
+        include_matches = bool(re.search(include_regex, text, flags=re.IGNORECASE | re.DOTALL))
+
+    # Aufschaltungen can arrive as forwarded/redirected messages. In that case EWS may expose
+    # Dennis/Ajax as the technical sender even though the mailbox rule came via Aufschaltungen Berlin.
+    if allowed_from_emails and from_email not in allowed_from_emails and not include_matches:
+        return False
+
+    if include_regex and not include_matches:
         return False
     if exclude_regex and re.search(exclude_regex, text, flags=re.IGNORECASE | re.DOTALL):
         return False
