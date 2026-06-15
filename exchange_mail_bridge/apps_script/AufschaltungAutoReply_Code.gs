@@ -15,8 +15,10 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   FORM_LINK: "https://matteohaudenschild.github.io/Aufschaltformular/",
   LOGO_URL: "https://www.sicherheit-nord.de/assets/Logos/Logos-Farbe/SN_Logo.png",
   USE_HTML_EMAIL: true,
-  ALLOW_BODY_EMAIL_FALLBACK: true,
-  REQUIRED_KEYWORDS: [],
+  ALLOW_BODY_EMAIL_FALLBACK: false,
+  REQUIRED_KEYWORDS: [
+    "NSL-Aufschaltungsanfrage"
+  ],
   INTERNAL_DOMAINS: [
     "sicherheit-nord.de",
     "wackerhagengruppe.de",
@@ -354,28 +356,10 @@ function aufschaltungExtractCustomerEmailFromRow_(row) {
     };
   }
 
-  const fromEmail = aufschaltungNormalizeEmail_(row.FromEmail);
-  if (fromEmail && aufschaltungIsAllowedRecipient_(fromEmail)) {
-    return {
-      email: fromEmail,
-      source: "fromEmail"
-    };
-  }
-
-  if (AUFSCHALTUNG_AUTO_REPLY_CONFIG.ALLOW_BODY_EMAIL_FALLBACK) {
-    const fallback = aufschaltungExtractFallbackEmail_(bodyText);
-    if (fallback) {
-      return {
-        email: fallback,
-        source: "body-fallback"
-      };
-    }
-  }
-
   return {
     email: "",
     source: "",
-    reason: "Keine externe Kundenadresse im Text oder Absender erkannt."
+    reason: "Keine sichere Kundenadresse im Feld E-Mail-Adresse der Ajax-Aufschaltung erkannt."
   };
 }
 
