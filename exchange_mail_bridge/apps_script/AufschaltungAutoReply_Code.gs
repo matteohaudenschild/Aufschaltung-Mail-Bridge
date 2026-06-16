@@ -136,7 +136,13 @@ function createAufschaltungSheetAndSetPropertyNow() {
 function processAufschaltungExchangeSheetAutoReplies_() {
   if (!AUFSCHALTUNG_AUTO_REPLY_CONFIG.ENABLED) {
     Logger.log("Aufschaltungs-AutoReply ist deaktiviert.");
-    return;
+    return {
+      checked: 0,
+      sent: 0,
+      skipped: 0,
+      review: 0,
+      disabled: true
+    };
   }
 
   const sheet = aufschaltungGetSheet_();
@@ -147,7 +153,12 @@ function processAufschaltungExchangeSheetAutoReplies_() {
   const lastRow = sheet.getLastRow();
   if (lastRow <= 1) {
     Logger.log("Keine Exchange-Zeilen im Aufschaltungs-Sheet vorhanden.");
-    return;
+    return {
+      checked: 0,
+      sent: 0,
+      skipped: 0,
+      review: 0
+    };
   }
 
   const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
@@ -254,6 +265,13 @@ function processAufschaltungExchangeSheetAutoReplies_() {
     + ", review="
     + review
   );
+
+  return {
+    checked: processed,
+    sent: sent,
+    skipped: skipped,
+    review: review
+  };
 }
 
 function aufschaltungGetSheet_() {
@@ -736,11 +754,33 @@ function aufschaltungBridgeDoPost_(e) {
       sheet.getRange(update.rowNumber, 1, 1, update.row.length).setValues([update.row]);
     });
 
+    let autoReply = {
+      triggered: false
+    };
+
+    if (rows.length > 0 || updated > 0) {
+      try {
+        autoReply = Object.assign(
+          {
+            triggered: true
+          },
+          processAufschaltungExchangeSheetAutoReplies_()
+        );
+      } catch (autoReplyError) {
+        autoReply = {
+          triggered: true,
+          ok: false,
+          error: String(autoReplyError && autoReplyError.message ? autoReplyError.message : autoReplyError)
+        };
+      }
+    }
+
     return aufschaltungBridgeJsonResponse_({
       ok: true,
       appended: rows.length,
       updated: updated,
-      skipped: skipped
+      skipped: skipped,
+      autoReply: autoReply
     });
   } catch (error) {
     return aufschaltungBridgeJsonResponse_({
