@@ -11,6 +11,10 @@ on:
         description: "Optional test mail subject"
         required: false
         default: ""
+      test_customer_email:
+        description: "Customer email embedded in the Ajax test mail"
+        required: false
+        default: "kunde.autoreply.test@example.com"
       create_inbox_item:
         description: "Create the test message directly in the inbox instead of sending it"
         required: false
@@ -29,6 +33,7 @@ jobs:
       EWS_VERIFY_TLS: ${{ secrets.EWS_VERIFY_TLS }}
       TEST_MAIL_TO: ${{ inputs.test_mail_to }}
       TEST_MAIL_SUBJECT: ${{ inputs.test_mail_subject }}
+      TEST_CUSTOMER_EMAIL: ${{ inputs.test_customer_email }}
       TEST_MAIL_CREATE_INBOX_ITEM: ${{ inputs.create_inbox_item }}
 
     steps:
