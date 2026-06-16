@@ -439,7 +439,20 @@ def iso_or_empty(value: Any) -> str:
 def post_messages(messages: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     message_list = list(messages)
     batch_size = max(1, int(env("POST_BATCH_SIZE", "10")))
-    result: Dict[str, Any] = {"ok": True, "appended": 0, "updated": 0, "skipped": 0}
+    result: Dict[str, Any] = {
+        "ok": True,
+        "appended": 0,
+        "updated": 0,
+        "skipped": 0,
+        "autoReply": {
+            "triggered": False,
+            "checked": 0,
+            "sent": 0,
+            "skipped": 0,
+            "review": 0,
+            "errors": [],
+        },
+    }
 
     for index in range(0, len(message_list), batch_size):
         payload = {
@@ -458,6 +471,17 @@ def post_messages(messages: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
 
         for key in ("appended", "updated", "skipped"):
             result[key] += int(batch_result.get(key, 0) or 0)
+
+        batch_auto_reply = batch_result.get("autoReply")
+        if isinstance(batch_auto_reply, dict):
+            result["autoReply"]["triggered"] = (
+                result["autoReply"]["triggered"]
+                or bool(batch_auto_reply.get("triggered"))
+            )
+            for key in ("checked", "sent", "skipped", "review"):
+                result["autoReply"][key] += int(batch_auto_reply.get(key, 0) or 0)
+            if batch_auto_reply.get("error"):
+                result["autoReply"]["errors"].append(str(batch_auto_reply.get("error")))
 
     return result
 
