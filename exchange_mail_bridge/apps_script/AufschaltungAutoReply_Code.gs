@@ -602,10 +602,11 @@ function aufschaltungExtractDriveFileIdFromUrl_(url) {
 
 function aufschaltungExtractExplicitCustomerEmail_(body) {
   const plainBody = String(body || "");
+  const emailAddressLabel = "(?:e[\\s-]*mail|email|mail)(?:[\\s-]*(?:adresse|address))?";
   const fieldPatterns = [
-    /^[ \t]*(?:e-?mail|email|mail)(?:[ -]?adresse| address)?\s*:\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/im,
-    /^[ \t]*(?:kunden|kunde|customer|kontakt|ansprechpartner)[^\n:]{0,70}(?:e-?mail|email|mail)(?:[ -]?adresse| address)?\s*:\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/im,
-    /^[ \t]*(?:e-?mail|email|mail)(?:[ -]?adresse| address)?[^\n:]{0,70}(?:kunden|kunde|customer|kontakt|ansprechpartner)\s*:\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/im
+    new RegExp("^[ \\t]*" + emailAddressLabel + "\\s*:\\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})", "im"),
+    new RegExp("^[ \\t]*(?:kunden|kunde|customer|kontakt|ansprechpartner)[^\\n:]{0,70}" + emailAddressLabel + "\\s*:\\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})", "im"),
+    new RegExp("^[ \\t]*" + emailAddressLabel + "[^\\n:]{0,70}(?:kunden|kunde|customer|kontakt|ansprechpartner)\\s*:\\s*([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})", "im")
   ];
 
   for (let i = 0; i < fieldPatterns.length; i += 1) {
