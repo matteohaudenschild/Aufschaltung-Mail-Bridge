@@ -366,6 +366,11 @@ function aufschaltungBuildAlreadyRepliedEmailSet_(values, columns) {
   const emails = new Set();
 
   values.forEach(function(rowValues) {
+    const row = aufschaltungBuildRowObject_(rowValues, columns);
+    if (aufschaltungIsCodyTestRow_(row)) {
+      return;
+    }
+
     const status = String(rowValues[columns.AufschaltungAutoReplyStatus] || "").trim().toLowerCase();
     if (!aufschaltungStatusCountsAsAlreadyReplied_(status)) {
       return;
@@ -378,6 +383,26 @@ function aufschaltungBuildAlreadyRepliedEmailSet_(values, columns) {
   });
 
   return emails;
+}
+
+function aufschaltungIsCodyTestRow_(row) {
+  const messageId = String(row.MessageId || "");
+  if (messageId.indexOf("cody-generated-aufschaltung-routing-test:") === 0) {
+    return true;
+  }
+
+  const haystack = aufschaltungNormalizeComparable_([
+    row.Subject,
+    row.BodyPreview,
+    row.BodyTextFull
+  ].join(" "));
+
+  return haystack.indexOf("cody e2e trigger test") !== -1
+    || haystack.indexOf("cody routing test") !== -1
+    || (
+      haystack.indexOf("technischer test") !== -1
+      && haystack.indexOf("cody testkunde") !== -1
+    );
 }
 
 function aufschaltungStatusCountsAsAlreadyReplied_(status) {
