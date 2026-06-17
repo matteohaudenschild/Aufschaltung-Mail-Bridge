@@ -9,7 +9,7 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   DELIVERY_MODE_PROPERTY: "AUFSCHALTUNG_DELIVERY_MODE",
   TEST_MODE_ENABLED: false,
   TEST_RECIPIENT_EMAIL: "matteo.haudenschild@gmail.com",
-  GENERATED_TEST_CUSTOMER_EMAIL: "matteo.merkler@nord.de",
+  GENERATED_TEST_CUSTOMER_EMAIL: "matteo.merkle@sicherheit-nord.de",
   SENDER_NAME: "Sicherheit Nord",
   FROM_ALIAS: "aufschaltungen.berlin@sicherheit-nord.de",
   REPLY_TO_EMAIL: "aufschaltungen.berlin@sicherheit-nord.de",
@@ -611,6 +611,10 @@ function aufschaltungIsAllowedRecipient_(email) {
   const normalized = aufschaltungNormalizeEmail_(email);
   if (!normalized || normalized.indexOf("@") === -1) {
     return false;
+  }
+
+  if (normalized === aufschaltungNormalizeEmail_(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GENERATED_TEST_CUSTOMER_EMAIL)) {
+    return true;
   }
 
   const parts = normalized.split("@");
