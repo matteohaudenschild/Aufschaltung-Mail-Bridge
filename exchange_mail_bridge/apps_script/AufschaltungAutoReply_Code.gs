@@ -6,8 +6,10 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   START_AFTER_ISO: "2026-06-11T00:00:00.000Z",
   MAX_ROWS_PER_RUN: 25,
   TRIGGER_INTERVAL_MINUTES: 5,
+  DELIVERY_MODE_PROPERTY: "AUFSCHALTUNG_DELIVERY_MODE",
   TEST_MODE_ENABLED: false,
   TEST_RECIPIENT_EMAIL: "matteo.haudenschild@gmail.com",
+  GENERATED_TEST_CUSTOMER_EMAIL: "matteo.merkler@nord.de",
   SENDER_NAME: "Sicherheit Nord",
   FROM_ALIAS: "aufschaltungen.berlin@sicherheit-nord.de",
   REPLY_TO_EMAIL: "aufschaltungen.berlin@sicherheit-nord.de",
@@ -77,6 +79,69 @@ function sendAufschaltungPreviewToPrivateTestNow() {
   Logger.log("Aufschaltungs-Testmail gesendet an " + testRecipient);
 }
 
+function enableAufschaltungTestMode() {
+  PropertiesService.getScriptProperties().setProperty(
+    AUFSCHALTUNG_AUTO_REPLY_CONFIG.DELIVERY_MODE_PROPERTY,
+    "test"
+  );
+  Logger.log(
+    "Aufschaltungs-Testmodus aktiv: AutoReplies gehen an "
+    + AUFSCHALTUNG_AUTO_REPLY_CONFIG.TEST_RECIPIENT_EMAIL
+    + ", erkannte Kundenadressen werden nur protokolliert."
+  );
+}
+
+function enableAufschaltungLiveMode() {
+  PropertiesService.getScriptProperties().setProperty(
+    AUFSCHALTUNG_AUTO_REPLY_CONFIG.DELIVERY_MODE_PROPERTY,
+    "live"
+  );
+  Logger.log("Aufschaltungs-Livemodus aktiv: AutoReplies gehen an die erkannte E-Mail-Adresse aus dem Ajax-Text.");
+}
+
+function checkAufschaltungDeliveryMode() {
+  const mode = aufschaltungGetDeliveryMode_();
+  Logger.log("Aktueller Aufschaltungs-Modus: " + mode);
+  Logger.log("Testempfaenger: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.TEST_RECIPIENT_EMAIL);
+  Logger.log("Generierte Test-Kundenadresse im Ajax-Text: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.GENERATED_TEST_CUSTOMER_EMAIL);
+  return mode;
+}
+
+function runGeneratedAjaxAufschaltungRoutingTestNow() {
+  const customerEmail = aufschaltungNormalizeEmail_(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GENERATED_TEST_CUSTOMER_EMAIL);
+  if (!customerEmail) {
+    throw new Error("GENERATED_TEST_CUSTOMER_EMAIL ist leer.");
+  }
+
+  const sheet = aufschaltungGetSheet_();
+  aufschaltungBridgeEnsureHeader_(sheet);
+  const headers = aufschaltungEnsureHeaders_(sheet);
+  const columns = aufschaltungHeaderIndex_(headers);
+  aufschaltungAssertRequiredColumns_(columns);
+  aufschaltungResetGeneratedRoutingTestRows_(sheet, columns);
+
+  const now = new Date();
+  const message = {
+    id: "cody-generated-aufschaltung-routing-test:" + now.getTime(),
+    receivedTime: now.toISOString(),
+    fromName: "Dennis Gessert",
+    fromEmail: "aufschaltungen.berlin@sicherheit-nord.de",
+    subject: "WG: NSL-Aufschaltungsanfrage - Cody Routing Test",
+    bodyPreview: "NSL-Aufschaltungsanfrage mit Test-Kundenadresse " + customerEmail,
+    bodyTextFull: aufschaltungBuildGeneratedAjaxTestBody_(customerEmail, now),
+    conversationId: "cody-generated-aufschaltung-routing-test",
+    webLink: ""
+  };
+
+  const row = aufschaltungBridgeBuildRow_(message, "", "", now.toISOString());
+  sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]);
+  Logger.log("Generierte Ajax-Testzeile angelegt. Kundenadresse im Text: " + customerEmail);
+
+  const result = processAufschaltungExchangeSheetAutoReplies_();
+  Logger.log("Generierter Ajax-Routing-Test beendet: " + JSON.stringify(result));
+  return result;
+}
+
 function setupAutoReplyAufschaltungTrigger() {
   aufschaltungRemoveTriggersForFunction_("autoReplyAufschaltung");
 
@@ -103,6 +168,7 @@ function checkAutoReplyAufschaltungSetup() {
   Logger.log("Header: " + headers.join(", "));
   Logger.log("Absendername: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.SENDER_NAME);
   Logger.log("Absenderadresse: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.FROM_ALIAS);
+  Logger.log("Delivery-Modus: " + aufschaltungGetDeliveryMode_());
   Logger.log("Verfuegbare Gmail-Aliase: " + (aliases.length ? aliases.join(", ") : "(keine)"));
   if (
     AUFSCHALTUNG_AUTO_REPLY_CONFIG.FROM_ALIAS
@@ -655,7 +721,7 @@ function aufschaltungSendAutoReply_(customerEmail, mail) {
 }
 
 function aufschaltungResolveDeliveryRecipient_(detectedRecipient) {
-  if (AUFSCHALTUNG_AUTO_REPLY_CONFIG.TEST_MODE_ENABLED) {
+  if (aufschaltungGetDeliveryMode_() === "test") {
     const testRecipient = aufschaltungNormalizeEmail_(AUFSCHALTUNG_AUTO_REPLY_CONFIG.TEST_RECIPIENT_EMAIL);
     if (!testRecipient) {
       throw new Error("TEST_MODE_ENABLED ist aktiv, aber TEST_RECIPIENT_EMAIL ist leer.");
@@ -673,6 +739,64 @@ function aufschaltungResolveDeliveryRecipient_(detectedRecipient) {
     testMode: false,
     detectedRecipient: detectedRecipient
   };
+}
+
+function aufschaltungGetDeliveryMode_() {
+  const propMode = String(
+    PropertiesService.getScriptProperties().getProperty(AUFSCHALTUNG_AUTO_REPLY_CONFIG.DELIVERY_MODE_PROPERTY) || ""
+  ).trim().toLowerCase();
+
+  if (propMode === "test" || propMode === "live") {
+    return propMode;
+  }
+
+  return AUFSCHALTUNG_AUTO_REPLY_CONFIG.TEST_MODE_ENABLED ? "test" : "live";
+}
+
+function aufschaltungBuildGeneratedAjaxTestBody_(customerEmail, dateValue) {
+  const timestamp = Utilities.formatDate(
+    dateValue,
+    Session.getScriptTimeZone() || "Europe/Berlin",
+    "EEEE, dd. MMMM yyyy HH:mm:ss"
+  );
+
+  return [
+    "Von: Ajax Team",
+    "Gesendet: " + timestamp + " (UTC+01:00) Amsterdam, Berlin, Bern, Rom, Stockholm, Wien",
+    "An: Dennis Gessert",
+    "Betreff: NSL-Aufschaltungsanfrage",
+    "",
+    "AKTUELLE WARNUNG: Vorsicht vor Phishing-E-Mails! - Alle empfangenden E-Mails auf Echtheit pruefen, da u.U. Fake-Adressen (Identitaetsdiebstahl!) verwendet werden ODER bekannte Absender Opfer eines Hackings/Cyberangriffs geworden sind! Im Zweifelsfall nicht antworten, keinen Link anklicken, keine Anhaenge oeffnen UND den Datenschutzbeauftragten informieren (datenschutz@wachdienst.de) !",
+    "",
+    "",
+    "Hallo!",
+    "Der Benutzer Cody Routing Test moechte sein Sicherheitssystem (Cody Testobjekt hub ID 00C0DY01) mit Ihrer Ueberwachungszentrale verbinden und hat folgende Kontaktdaten bereitgestellt, um die Details mit Ihnen zu besprechen.",
+    "",
+    "E-Mail-Adresse: " + customerEmail,
+    "Telefonnummer: +491744943000",
+    "Name: Cody Routing Test"
+  ].join("\n");
+}
+
+function aufschaltungResetGeneratedRoutingTestRows_(sheet, columns) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1 || !("MessageId" in columns) || !("AufschaltungAutoReplyStatus" in columns)) {
+    return;
+  }
+
+  const values = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+  values.forEach(function(rowValues, index) {
+    const messageId = String(rowValues[columns.MessageId] || "");
+    if (messageId.indexOf("cody-generated-aufschaltung-routing-test:") !== 0) {
+      return;
+    }
+
+    const rowNumber = index + 2;
+    sheet.getRange(rowNumber, columns.AufschaltungAutoReplyStatus + 1).setValue(AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED);
+    if ("AufschaltungAutoReplyReason" in columns) {
+      sheet.getRange(rowNumber, columns.AufschaltungAutoReplyReason + 1).setValue("Alter generierter Cody-Routing-Test deaktiviert, damit ein neuer Routing-Test moeglich ist.");
+    }
+  });
 }
 
 function aufschaltungSetStatus_(sheet, columns, rowNumber, status, recipient, reason, source, detectedCustomerEmail) {
