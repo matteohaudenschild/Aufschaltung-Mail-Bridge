@@ -6,7 +6,7 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   START_AFTER_ISO: "2026-06-11T00:00:00.000Z",
   MAX_ROWS_PER_RUN: 25,
   TRIGGER_INTERVAL_MINUTES: 5,
-  TEST_MODE_ENABLED: true,
+  TEST_MODE_ENABLED: false,
   TEST_RECIPIENT_EMAIL: "matteo.haudenschild@gmail.com",
   SENDER_NAME: "Sicherheit Nord",
   FROM_ALIAS: "aufschaltungen.berlin@sicherheit-nord.de",
