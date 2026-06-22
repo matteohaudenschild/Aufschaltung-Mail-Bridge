@@ -229,7 +229,6 @@ function processAufschaltungExchangeSheetAutoReplies_() {
   }
 
   const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  const alreadyRepliedKeys = aufschaltungBuildAlreadyRepliedKeySet_(values, columns);
   let processed = 0;
   let sent = 0;
   let skipped = 0;
@@ -295,24 +294,6 @@ function processAufschaltungExchangeSheetAutoReplies_() {
         continue;
       }
 
-      const duplicateKey = aufschaltungBuildDuplicateReplyKey_(row, recipient.email);
-      if (alreadyRepliedKeys.has(duplicateKey)) {
-        const reason = "Duplikat: Fuer diese Kundenadresse und Anlage/Hub wurde bereits eine Aufschaltungs-AutoReply gesendet.";
-        aufschaltungSetStatus_(
-          sheet,
-          columns,
-          rowNumber,
-          AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED,
-          recipient.email,
-          reason,
-          "duplicate-customer-hub",
-          recipient.email
-        );
-        aufschaltungPushAutoReplyDetail_(details, rowNumber, row, AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED, recipient.email, reason, "duplicate-customer-hub", recipient.email);
-        skipped += 1;
-        continue;
-      }
-
       const delivery = aufschaltungResolveDeliveryRecipient_(recipient.email);
       const mail = aufschaltungBuildAutoReplyMail_();
       aufschaltungSendAutoReply_(delivery.email, mail);
@@ -331,7 +312,6 @@ function processAufschaltungExchangeSheetAutoReplies_() {
         recipient.email
       );
       aufschaltungPushAutoReplyDetail_(details, rowNumber, row, sentStatus, delivery.email, sentReason, recipient.source, recipient.email);
-      alreadyRepliedKeys.add(duplicateKey);
       sent += 1;
       Logger.log(
         "Aufschaltungs-AutoReply gesendet fuer Zeile "
@@ -378,115 +358,6 @@ function processAufschaltungExchangeSheetAutoReplies_() {
     review: review,
     details: details
   };
-}
-
-function aufschaltungBuildAlreadyRepliedKeySet_(values, columns) {
-  const keys = new Set();
-
-  values.forEach(function(rowValues) {
-    const row = aufschaltungBuildRowObject_(rowValues, columns);
-    if (aufschaltungIsCodyTestRow_(row)) {
-      return;
-    }
-
-    const status = String(rowValues[columns.AufschaltungAutoReplyStatus] || "").trim().toLowerCase();
-    if (!aufschaltungStatusCountsAsAlreadyReplied_(status)) {
-      return;
-    }
-
-    const email = aufschaltungExtractAlreadyRepliedEmailFromValues_(rowValues, columns);
-    if (email) {
-      keys.add(aufschaltungBuildDuplicateReplyKey_(row, email));
-    }
-  });
-
-  return keys;
-}
-
-function aufschaltungIsCodyTestRow_(row) {
-  const messageId = String(row.MessageId || "");
-  if (messageId.indexOf("cody-generated-aufschaltung-routing-test:") === 0) {
-    return true;
-  }
-
-  const haystack = aufschaltungNormalizeComparable_([
-    row.Subject,
-    row.BodyPreview,
-    row.BodyTextFull
-  ].join(" "));
-
-  return haystack.indexOf("cody e2e trigger test") !== -1
-    || haystack.indexOf("cody routing test") !== -1
-    || (
-      haystack.indexOf("technischer test") !== -1
-      && haystack.indexOf("cody testkunde") !== -1
-    );
-}
-
-function aufschaltungStatusCountsAsAlreadyReplied_(status) {
-  if (status === AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SENT) {
-    return true;
-  }
-
-  return aufschaltungGetDeliveryMode_() === "test"
-    && status === AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_TEST_SENT;
-}
-
-function aufschaltungExtractAlreadyRepliedEmailFromValues_(rowValues, columns) {
-  if ("AufschaltungAutoReplyDetectedCustomerEmail" in columns) {
-    const detected = aufschaltungNormalizeEmail_(rowValues[columns.AufschaltungAutoReplyDetectedCustomerEmail]);
-    if (detected) {
-      return detected;
-    }
-  }
-
-  if ("AufschaltungAutoReplyReason" in columns) {
-    const reasonEmail = aufschaltungExtractEmailFromStatusReason_(rowValues[columns.AufschaltungAutoReplyReason]);
-    if (reasonEmail) {
-      return reasonEmail;
-    }
-  }
-
-  if ("AufschaltungAutoReplyTo" in columns) {
-    const toEmail = aufschaltungNormalizeEmail_(rowValues[columns.AufschaltungAutoReplyTo]);
-    const testEmail = aufschaltungNormalizeEmail_(AUFSCHALTUNG_AUTO_REPLY_CONFIG.TEST_RECIPIENT_EMAIL);
-    if (toEmail && toEmail !== testEmail) {
-      return toEmail;
-    }
-  }
-
-  return "";
-}
-
-function aufschaltungBuildDuplicateReplyKey_(row, email) {
-  const normalizedEmail = aufschaltungNormalizeEmail_(email);
-  const hubId = aufschaltungExtractHubId_(aufschaltungGetBestBodyText_(row));
-  if (hubId) {
-    return normalizedEmail + "|hub:" + hubId;
-  }
-
-  const messageId = String(row && row.MessageId ? row.MessageId : "").trim().toLowerCase();
-  if (messageId) {
-    return normalizedEmail + "|message:" + messageId;
-  }
-
-  return normalizedEmail + "|subject:" + String(row && row.Subject ? row.Subject : "").trim().toLowerCase();
-}
-
-function aufschaltungExtractHubId_(body) {
-  const match = String(body || "").match(/\bhub\s*id\s*[:#-]?\s*([A-Z0-9_-]{4,})/i);
-  return match && match[1] ? match[1].toUpperCase() : "";
-}
-
-function aufschaltungExtractEmailFromStatusReason_(reason) {
-  const matches = String(reason || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
-  for (let i = 0; i < matches.length; i += 1) {
-    const email = aufschaltungNormalizeEmail_(matches[i]);
-    if (email && aufschaltungIsAllowedRecipient_(email)) {
-      return email;
-    }
-  }
-  return "";
 }
 
 function aufschaltungGetSheet_() {
