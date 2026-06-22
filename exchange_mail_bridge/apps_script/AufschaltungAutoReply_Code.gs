@@ -234,6 +234,7 @@ function processAufschaltungExchangeSheetAutoReplies_() {
   let sent = 0;
   let skipped = 0;
   let review = 0;
+  let details = [];
 
   for (let index = 0; index < values.length; index += 1) {
     if (processed >= AUFSCHALTUNG_AUTO_REPLY_CONFIG.MAX_ROWS_PER_RUN) {
@@ -260,46 +261,53 @@ function processAufschaltungExchangeSheetAutoReplies_() {
     try {
       const recipient = aufschaltungExtractCustomerEmailFromRow_(row);
       if (!recipient.email) {
+        const reason = recipient.reason || "Keine sichere Kunden-E-Mail-Adresse erkannt.";
+        const source = recipient.source || "";
         aufschaltungSetStatus_(
           sheet,
           columns,
           rowNumber,
           AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_REVIEW,
           "",
-          recipient.reason || "Keine sichere Kunden-E-Mail-Adresse erkannt.",
-          recipient.source || "",
+          reason,
+          source,
           ""
         );
+        aufschaltungPushAutoReplyDetail_(details, rowNumber, row, AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_REVIEW, "", reason, source, "");
         review += 1;
         continue;
       }
 
       if (!aufschaltungIsAllowedRecipient_(recipient.email)) {
+        const reason = "Empfaenger ist intern, Systemadresse oder blockiert.";
         aufschaltungSetStatus_(
           sheet,
           columns,
           rowNumber,
           AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED,
           recipient.email,
-          "Empfaenger ist intern, Systemadresse oder blockiert.",
+          reason,
           recipient.source,
           recipient.email
         );
+        aufschaltungPushAutoReplyDetail_(details, rowNumber, row, AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED, recipient.email, reason, recipient.source, recipient.email);
         skipped += 1;
         continue;
       }
 
       if (alreadyRepliedEmails.has(recipient.email)) {
+        const reason = "Duplikat: Fuer diese Kundenadresse wurde bereits eine Aufschaltungs-AutoReply gesendet.";
         aufschaltungSetStatus_(
           sheet,
           columns,
           rowNumber,
           AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED,
           recipient.email,
-          "Duplikat: Fuer diese Kundenadresse wurde bereits eine Aufschaltungs-AutoReply gesendet.",
+          reason,
           "duplicate-customer-email",
           recipient.email
         );
+        aufschaltungPushAutoReplyDetail_(details, rowNumber, row, AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED, recipient.email, reason, "duplicate-customer-email", recipient.email);
         skipped += 1;
         continue;
       }
@@ -307,18 +315,21 @@ function processAufschaltungExchangeSheetAutoReplies_() {
       const delivery = aufschaltungResolveDeliveryRecipient_(recipient.email);
       const mail = aufschaltungBuildAutoReplyMail_();
       aufschaltungSendAutoReply_(delivery.email, mail);
+      const sentStatus = delivery.testMode ? AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_TEST_SENT : AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SENT;
+      const sentReason = delivery.testMode
+        ? "TESTMODUS: AutoReply an Testadresse gesendet. Erkannte Kundenadresse waere: " + recipient.email
+        : "Aufschaltungs-AutoReply gesendet.";
       aufschaltungSetStatus_(
         sheet,
         columns,
         rowNumber,
-        delivery.testMode ? AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_TEST_SENT : AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SENT,
+        sentStatus,
         delivery.email,
-        delivery.testMode
-          ? "TESTMODUS: AutoReply an Testadresse gesendet. Erkannte Kundenadresse waere: " + recipient.email
-          : "Aufschaltungs-AutoReply gesendet.",
+        sentReason,
         recipient.source,
         recipient.email
       );
+      aufschaltungPushAutoReplyDetail_(details, rowNumber, row, sentStatus, delivery.email, sentReason, recipient.source, recipient.email);
       alreadyRepliedEmails.add(recipient.email);
       sent += 1;
       Logger.log(
@@ -329,16 +340,18 @@ function processAufschaltungExchangeSheetAutoReplies_() {
         + (delivery.testMode ? " (Testmodus, erkannt: " + recipient.email + ")" : "")
       );
     } catch (error) {
+      const reason = String(error && error.message ? error.message : error);
       aufschaltungSetStatus_(
         sheet,
         columns,
         rowNumber,
         AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_ERROR,
         "",
-        String(error && error.message ? error.message : error),
+        reason,
         "exception",
         ""
       );
+      aufschaltungPushAutoReplyDetail_(details, rowNumber, row, AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_ERROR, "", reason, "exception", "");
       Logger.log("Aufschaltungs-AutoReply Fehler in Zeile " + rowNumber + ": " + error);
     }
   }
@@ -353,12 +366,16 @@ function processAufschaltungExchangeSheetAutoReplies_() {
     + ", review="
     + review
   );
+  if (details.length) {
+    Logger.log("Aufschaltungs-AutoReply Details: " + JSON.stringify(details));
+  }
 
   return {
     checked: processed,
     sent: sent,
     skipped: skipped,
-    review: review
+    review: review,
+    details: details
   };
 }
 
@@ -839,6 +856,24 @@ function aufschaltungSetStatus_(sheet, columns, rowNumber, status, recipient, re
   }
   sheet.getRange(rowNumber, columns.AufschaltungAutoReplyReason + 1).setValue(aufschaltungTruncate_(reason || "", 1000));
   sheet.getRange(rowNumber, columns.AufschaltungAutoReplySource + 1).setValue(source || "");
+}
+
+function aufschaltungPushAutoReplyDetail_(details, rowNumber, row, status, recipient, reason, source, detectedCustomerEmail) {
+  if (!Array.isArray(details) || details.length >= 25) {
+    return;
+  }
+
+  details.push({
+    row: rowNumber,
+    status: String(status || ""),
+    recipient: aufschaltungNormalizeEmail_(recipient || ""),
+    detectedCustomerEmail: aufschaltungNormalizeEmail_(detectedCustomerEmail || ""),
+    reason: aufschaltungTruncate_(reason || "", 500),
+    source: String(source || ""),
+    subject: aufschaltungTruncate_(row && row.Subject ? row.Subject : "", 180),
+    fromEmail: aufschaltungNormalizeEmail_(row && row.FromEmail ? row.FromEmail : ""),
+    receivedTime: String(row && row.ReceivedTime ? row.ReceivedTime : "")
+  });
 }
 
 function aufschaltungStripHtml_(value) {

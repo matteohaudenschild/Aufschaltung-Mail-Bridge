@@ -451,6 +451,7 @@ def post_messages(messages: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
             "skipped": 0,
             "review": 0,
             "errors": [],
+            "details": [],
         },
     }
 
@@ -482,6 +483,9 @@ def post_messages(messages: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
                 result["autoReply"][key] += int(batch_auto_reply.get(key, 0) or 0)
             if batch_auto_reply.get("error"):
                 result["autoReply"]["errors"].append(str(batch_auto_reply.get("error")))
+            details = batch_auto_reply.get("details")
+            if isinstance(details, list):
+                result["autoReply"]["details"].extend(details[:25])
 
     return result
 
