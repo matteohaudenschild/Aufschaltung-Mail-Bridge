@@ -229,7 +229,7 @@ function processAufschaltungExchangeSheetAutoReplies_() {
   }
 
   const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
-  const alreadyRepliedEmails = aufschaltungBuildAlreadyRepliedEmailSet_(values, columns);
+  const alreadyRepliedKeys = aufschaltungBuildAlreadyRepliedKeySet_(values, columns);
   let processed = 0;
   let sent = 0;
   let skipped = 0;
@@ -295,8 +295,9 @@ function processAufschaltungExchangeSheetAutoReplies_() {
         continue;
       }
 
-      if (alreadyRepliedEmails.has(recipient.email)) {
-        const reason = "Duplikat: Fuer diese Kundenadresse wurde bereits eine Aufschaltungs-AutoReply gesendet.";
+      const duplicateKey = aufschaltungBuildDuplicateReplyKey_(row, recipient.email);
+      if (alreadyRepliedKeys.has(duplicateKey)) {
+        const reason = "Duplikat: Fuer diese Kundenadresse und Anlage/Hub wurde bereits eine Aufschaltungs-AutoReply gesendet.";
         aufschaltungSetStatus_(
           sheet,
           columns,
@@ -304,10 +305,10 @@ function processAufschaltungExchangeSheetAutoReplies_() {
           AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED,
           recipient.email,
           reason,
-          "duplicate-customer-email",
+          "duplicate-customer-hub",
           recipient.email
         );
-        aufschaltungPushAutoReplyDetail_(details, rowNumber, row, AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED, recipient.email, reason, "duplicate-customer-email", recipient.email);
+        aufschaltungPushAutoReplyDetail_(details, rowNumber, row, AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SKIPPED, recipient.email, reason, "duplicate-customer-hub", recipient.email);
         skipped += 1;
         continue;
       }
@@ -330,7 +331,7 @@ function processAufschaltungExchangeSheetAutoReplies_() {
         recipient.email
       );
       aufschaltungPushAutoReplyDetail_(details, rowNumber, row, sentStatus, delivery.email, sentReason, recipient.source, recipient.email);
-      alreadyRepliedEmails.add(recipient.email);
+      alreadyRepliedKeys.add(duplicateKey);
       sent += 1;
       Logger.log(
         "Aufschaltungs-AutoReply gesendet fuer Zeile "
@@ -379,8 +380,8 @@ function processAufschaltungExchangeSheetAutoReplies_() {
   };
 }
 
-function aufschaltungBuildAlreadyRepliedEmailSet_(values, columns) {
-  const emails = new Set();
+function aufschaltungBuildAlreadyRepliedKeySet_(values, columns) {
+  const keys = new Set();
 
   values.forEach(function(rowValues) {
     const row = aufschaltungBuildRowObject_(rowValues, columns);
@@ -395,11 +396,11 @@ function aufschaltungBuildAlreadyRepliedEmailSet_(values, columns) {
 
     const email = aufschaltungExtractAlreadyRepliedEmailFromValues_(rowValues, columns);
     if (email) {
-      emails.add(email);
+      keys.add(aufschaltungBuildDuplicateReplyKey_(row, email));
     }
   });
 
-  return emails;
+  return keys;
 }
 
 function aufschaltungIsCodyTestRow_(row) {
@@ -451,6 +452,26 @@ function aufschaltungExtractAlreadyRepliedEmailFromValues_(rowValues, columns) {
   }
 
   return "";
+}
+
+function aufschaltungBuildDuplicateReplyKey_(row, email) {
+  const normalizedEmail = aufschaltungNormalizeEmail_(email);
+  const hubId = aufschaltungExtractHubId_(aufschaltungGetBestBodyText_(row));
+  if (hubId) {
+    return normalizedEmail + "|hub:" + hubId;
+  }
+
+  const messageId = String(row && row.MessageId ? row.MessageId : "").trim().toLowerCase();
+  if (messageId) {
+    return normalizedEmail + "|message:" + messageId;
+  }
+
+  return normalizedEmail + "|subject:" + String(row && row.Subject ? row.Subject : "").trim().toLowerCase();
+}
+
+function aufschaltungExtractHubId_(body) {
+  const match = String(body || "").match(/\bhub\s*id\s*[:#-]?\s*([A-Z0-9_-]{4,})/i);
+  return match && match[1] ? match[1].toUpperCase() : "";
 }
 
 function aufschaltungExtractEmailFromStatusReason_(reason) {
