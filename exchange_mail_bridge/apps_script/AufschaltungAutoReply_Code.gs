@@ -424,8 +424,12 @@ function aufschaltungIsCodyTestRow_(row) {
 }
 
 function aufschaltungStatusCountsAsAlreadyReplied_(status) {
-  return status === AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SENT
-    || status === AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_TEST_SENT;
+  if (status === AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SENT) {
+    return true;
+  }
+
+  return aufschaltungGetDeliveryMode_() === "test"
+    && status === AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_TEST_SENT;
 }
 
 function aufschaltungExtractAlreadyRepliedEmailFromValues_(rowValues, columns) {
