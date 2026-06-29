@@ -23,7 +23,6 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   GITHUB_WORKFLOW_MAIL_SCAN_TOP: 500,
   INTERNAL_COPY_EMAILS: [
     "matteo.merkle@sicherheit-nord.de",
-    "matteo.haudenschild@gmail.com",
     "Michael.Elsner@sicherheit-nord.de",
     "Dennis.Gessert@sicherheit-nord.de"
   ],
