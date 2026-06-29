@@ -10,6 +10,23 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   TEST_MODE_ENABLED: false,
   TEST_RECIPIENT_EMAIL: "matteo.haudenschild@gmail.com",
   GENERATED_TEST_CUSTOMER_EMAIL: "matteo.merkle@sicherheit-nord.de",
+  GITHUB_WORKFLOW_TOKEN_PROPERTY: "AUFSCHALTUNG_GITHUB_WORKFLOW_TOKEN",
+  GITHUB_WORKFLOW_LEGACY_TOKEN_PROPERTY: "GITHUB_WORKFLOW_TOKEN",
+  GITHUB_WORKFLOW_LAST_DISPATCH_AT_PROPERTY: "AUFSCHALTUNG_GITHUB_WORKFLOW_LAST_DISPATCH_AT",
+  GITHUB_WORKFLOW_REPOSITORY: "matteohaudenschild/Aufschaltung-Mail-Bridge",
+  GITHUB_WORKFLOW_FILE: "exchange-mail-bridge.yml",
+  GITHUB_WORKFLOW_REF: "master",
+  GITHUB_WORKFLOW_TRIGGER_INTERVAL_MINUTES: 5,
+  GITHUB_WORKFLOW_MIN_DISPATCH_INTERVAL_MINUTES: 4,
+  GITHUB_WORKFLOW_LOOKBACK_MINUTES: 1440,
+  GITHUB_WORKFLOW_MAIL_TOP: 50,
+  GITHUB_WORKFLOW_MAIL_SCAN_TOP: 500,
+  INTERNAL_COPY_EMAILS: [
+    "matteo.merkle@sicherheit-nord.de",
+    "Michael.Elsner@sicherheit-nord.de",
+    "Dennis.Gessert@sicherheit-nord.de"
+  ],
+  INTERNAL_COPY_SEND_MODE: "bcc",
   SENDER_NAME: "Sicherheit Nord",
   FROM_ALIAS: "aufschaltungen.berlin@sicherheit-nord.de",
   REPLY_TO_EMAIL: "aufschaltungen.berlin@sicherheit-nord.de",
@@ -75,7 +92,7 @@ function sendAufschaltungPreviewToPrivateTestNow() {
   }
 
   const mail = aufschaltungBuildAutoReplyMail_();
-  aufschaltungSendAutoReply_(testRecipient, mail);
+  aufschaltungSendAutoReply_(testRecipient, mail, { suppressInternalCopies: true });
   Logger.log("Aufschaltungs-Testmail gesendet an " + testRecipient);
 }
 
@@ -105,6 +122,114 @@ function checkAufschaltungDeliveryMode() {
   Logger.log("Testempfaenger: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.TEST_RECIPIENT_EMAIL);
   Logger.log("Generierte Test-Kundenadresse im Ajax-Text: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.GENERATED_TEST_CUSTOMER_EMAIL);
   return mode;
+}
+
+function triggerAufschaltungExchangeMailBridgeWorkflow() {
+  const props = PropertiesService.getScriptProperties();
+  const token = props.getProperty(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_TOKEN_PROPERTY)
+    || props.getProperty(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_LEGACY_TOKEN_PROPERTY);
+  if (!token) {
+    Logger.log(
+      "Aufschaltungs-GitHub-Dispatch uebersprungen: Script Property "
+      + AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_TOKEN_PROPERTY
+      + " fehlt."
+    );
+    return {
+      ok: false,
+      skipped: true,
+      reason: "missing-github-token"
+    };
+  }
+
+  const now = Date.now();
+  const lastDispatchAt = Number(
+    props.getProperty(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_LAST_DISPATCH_AT_PROPERTY) || 0
+  );
+  const minDispatchMs = Math.max(
+    1,
+    Number(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_MIN_DISPATCH_INTERVAL_MINUTES) || 1
+  ) * 60 * 1000;
+  if (lastDispatchAt && now - lastDispatchAt < minDispatchMs) {
+    Logger.log("Aufschaltungs-GitHub-Dispatch uebersprungen: letzter Dispatch ist noch zu frisch.");
+    return {
+      ok: true,
+      skipped: true,
+      reason: "recent-dispatch"
+    };
+  }
+
+  const workflowUrl = "https://api.github.com/repos/"
+    + AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_REPOSITORY
+    + "/actions/workflows/"
+    + encodeURIComponent(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_FILE)
+    + "/dispatches";
+
+  const response = UrlFetchApp.fetch(workflowUrl, {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + token,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    payload: JSON.stringify({
+      ref: AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_REF,
+      inputs: {
+        lookback_minutes: String(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_LOOKBACK_MINUTES),
+        mail_top: String(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_MAIL_TOP),
+        mail_scan_top: String(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_MAIL_SCAN_TOP),
+        include_attachments: "true",
+        include_body_html: "true",
+        dry_run_summary: "false"
+      }
+    }),
+    muteHttpExceptions: true
+  });
+
+  const status = response.getResponseCode();
+  const body = response.getContentText();
+  if (status < 200 || status >= 300) {
+    Logger.log("Aufschaltungs-GitHub-Dispatch fehlgeschlagen: HTTP " + status + " " + body);
+    return {
+      ok: false,
+      status: status,
+      body: body
+    };
+  }
+
+  props.setProperty(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_LAST_DISPATCH_AT_PROPERTY, String(now));
+  Logger.log("Aufschaltungs-GitHub-Workflow gestartet: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_FILE);
+  return {
+    ok: true,
+    status: status
+  };
+}
+
+function setupAufschaltungGitHubWorkflowDispatchTrigger() {
+  aufschaltungRemoveTriggersForFunction_("triggerAufschaltungExchangeMailBridgeWorkflow");
+
+  ScriptApp.newTrigger("triggerAufschaltungExchangeMailBridgeWorkflow")
+    .timeBased()
+    .everyMinutes(Math.max(1, Number(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_TRIGGER_INTERVAL_MINUTES) || 1))
+    .create();
+
+  Logger.log(
+    "Minutentrigger erstellt fuer triggerAufschaltungExchangeMailBridgeWorkflow: alle "
+    + String(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_TRIGGER_INTERVAL_MINUTES || 1)
+    + " Minute(n)."
+  );
+}
+
+function setupAufschaltungAutomationTriggers() {
+  aufschaltungCleanupObsoleteTriggers();
+  setupAutoReplyAufschaltungTrigger();
+  setupAufschaltungGitHubWorkflowDispatchTrigger();
+  Logger.log("Aufschaltungs-Automationstrigger sind eingerichtet.");
+}
+
+function aufschaltungCleanupObsoleteTriggers() {
+  aufschaltungRemoveTriggersForFunction_("autoReplyTest");
+  Logger.log("Veraltete Aufschaltungs-Testtrigger entfernt.");
 }
 
 function runGeneratedAjaxAufschaltungRoutingTestNow() {
@@ -169,6 +294,15 @@ function checkAutoReplyAufschaltungSetup() {
   Logger.log("Absendername: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.SENDER_NAME);
   Logger.log("Absenderadresse: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.FROM_ALIAS);
   Logger.log("Delivery-Modus: " + aufschaltungGetDeliveryMode_());
+  Logger.log("GitHub-Dispatch-Repo: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_REPOSITORY);
+  Logger.log("GitHub-Dispatch-Workflow: " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_FILE);
+  Logger.log(
+    "GitHub-Dispatch-Token gesetzt: "
+    + ((
+      PropertiesService.getScriptProperties().getProperty(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_TOKEN_PROPERTY)
+      || PropertiesService.getScriptProperties().getProperty(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_LEGACY_TOKEN_PROPERTY)
+    ) ? "ja" : "nein")
+  );
   Logger.log("Verfuegbare Gmail-Aliase: " + (aliases.length ? aliases.join(", ") : "(keine)"));
   if (
     AUFSCHALTUNG_AUTO_REPLY_CONFIG.FROM_ALIAS
@@ -296,7 +430,7 @@ function processAufschaltungExchangeSheetAutoReplies_() {
 
       const delivery = aufschaltungResolveDeliveryRecipient_(recipient.email);
       const mail = aufschaltungBuildAutoReplyMail_();
-      aufschaltungSendAutoReply_(delivery.email, mail);
+      aufschaltungSendAutoReply_(delivery.email, mail, { suppressInternalCopies: delivery.testMode });
       const sentStatus = delivery.testMode ? AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_TEST_SENT : AUFSCHALTUNG_AUTO_REPLY_CONFIG.STATUS_SENT;
       const sentReason = delivery.testMode
         ? "TESTMODUS: AutoReply an Testadresse gesendet. Erkannte Kundenadresse waere: " + recipient.email
@@ -638,7 +772,8 @@ function aufschaltungBuildAutoReplyMail_() {
   };
 }
 
-function aufschaltungSendAutoReply_(customerEmail, mail) {
+function aufschaltungSendAutoReply_(customerEmail, mail, sendOptions) {
+  const effectiveSendOptions = sendOptions || {};
   const options = {
     name: AUFSCHALTUNG_AUTO_REPLY_CONFIG.SENDER_NAME
   };
@@ -660,7 +795,35 @@ function aufschaltungSendAutoReply_(customerEmail, mail) {
     options.htmlBody = mail.htmlBody;
   }
 
+  const internalCopies = effectiveSendOptions.suppressInternalCopies
+    ? []
+    : aufschaltungGetInternalCopyEmails_(customerEmail);
+  if (internalCopies.length) {
+    const copyMode = String(AUFSCHALTUNG_AUTO_REPLY_CONFIG.INTERNAL_COPY_SEND_MODE || "bcc").toLowerCase();
+    if (copyMode === "cc") {
+      options.cc = internalCopies.join(",");
+    } else {
+      options.bcc = internalCopies.join(",");
+    }
+  }
+
   GmailApp.sendEmail(customerEmail, AUFSCHALTUNG_AUTO_REPLY_CONFIG.SUBJECT, mail.textBody, options);
+}
+
+function aufschaltungGetInternalCopyEmails_(customerEmail) {
+  const primary = aufschaltungNormalizeEmail_(customerEmail);
+  const seen = {};
+  return (AUFSCHALTUNG_AUTO_REPLY_CONFIG.INTERNAL_COPY_EMAILS || [])
+    .map(function(email) {
+      return aufschaltungNormalizeEmail_(email);
+    })
+    .filter(function(email) {
+      if (!email || email === primary || seen[email]) {
+        return false;
+      }
+      seen[email] = true;
+      return true;
+    });
 }
 
 function aufschaltungResolveDeliveryRecipient_(detectedRecipient) {

@@ -3,9 +3,10 @@ import base64
 import json
 import os
 import re
+import time
 from datetime import timedelta
 from html import unescape
-from typing import Any, Dict, Iterable, List
+from typing import Any, Callable, Dict, Iterable, List, TypeVar
 
 import requests
 from exchangelib import (
@@ -29,6 +30,7 @@ DEFAULT_AUFSCHALTUNG_INCLUDE_REGEX = (
     r"|Von:\s*Ajax Team"
     r"|E-?Mail-Adresse\s*:.*Telefonnummer\s*:.*Name\s*:"
 )
+T = TypeVar("T")
 
 
 def env(name: str, default: str = "") -> str:
@@ -49,6 +51,17 @@ def parse_bool(value: str, default: bool = True) -> bool:
     if not value:
         return default
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def parse_int_env(name: str, default: int, minimum: int = 0) -> int:
+    value = env(name)
+    if not value:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return max(minimum, parsed)
 
 
 def parse_email_allowlist(value: str) -> List[str]:
@@ -112,6 +125,63 @@ def fetch_messages(account: Account, lookback_minutes: int, top: int) -> List[Di
         if len(messages) >= top:
             break
     return messages
+
+
+def retry_transient_exchange(operation: Callable[[], T], stage: str) -> T:
+    attempts = parse_int_env("EWS_FETCH_RETRIES", 4, minimum=1)
+    delay_seconds = parse_int_env("EWS_FETCH_RETRY_DELAY_SECONDS", 20, minimum=0)
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return operation()
+        except Exception as exc:
+            if not is_transient_exchange_error(exc) or attempt >= attempts:
+                raise
+
+            print(json.dumps({
+                "ok": False,
+                "stage": stage,
+                "transient": True,
+                "attempt": attempt,
+                "attempts": attempts,
+                "error": safe_error(exc),
+                "note": "Temporary Exchange/EWS connection problem. Retrying.",
+            }, ensure_ascii=False))
+            if delay_seconds:
+                time.sleep(delay_seconds)
+
+    raise RuntimeError("unreachable retry state")
+
+
+def is_transient_exchange_error(error: Exception) -> bool:
+    text = safe_error(error).lower()
+    transient_markers = [
+        "connection reset by peer",
+        "connection aborted",
+        "remote end closed connection",
+        "temporarily unavailable",
+        "timeout",
+        "timed out",
+        "errortimeoutexpired",
+        "transporterror",
+        "serverbusy",
+        "ssl",
+    ]
+    hard_auth_markers = [
+        "unauthorized",
+        "invalid credentials",
+        "access is denied",
+        "forbidden",
+        "401",
+        "403",
+    ]
+    return any(marker in text for marker in transient_markers) and not any(
+        marker in text for marker in hard_auth_markers
+    )
+
+
+def safe_error(error: Exception) -> str:
+    return f"{error.__class__.__name__}: {str(error)}"[:2000]
 
 
 def message_matches_filters(message: Dict[str, Any]) -> bool:
@@ -505,9 +575,26 @@ def main() -> None:
     args = parse_args()
     lookback_minutes = int(env("MAIL_LOOKBACK_MINUTES", "60"))
     top = int(env("MAIL_TOP", "25"))
+    scan_top = int(env("MAIL_SCAN_TOP", str(top)))
 
     account = connect_account()
-    messages = fetch_messages(account, lookback_minutes=lookback_minutes, top=top)
+    try:
+        messages = retry_transient_exchange(
+            lambda: fetch_messages(account, lookback_minutes=lookback_minutes, top=top),
+            stage="exchange_fetch",
+        )
+    except Exception as exc:
+        if is_transient_exchange_error(exc) and parse_bool(env("EWS_TRANSIENT_FAILURE_EXIT_ZERO"), default=True):
+            print(json.dumps({
+                "ok": True,
+                "skipped": True,
+                "stage": "exchange_fetch",
+                "reason": "transient_exchange_error",
+                "error": safe_error(exc),
+                "note": "Exchange/EWS was temporarily unavailable. This run is treated as skipped; the next scheduled run will retry.",
+            }, ensure_ascii=False))
+            return
+        raise
 
     if args.dry_run_summary:
         print(json.dumps(build_dry_run_summary(messages), ensure_ascii=False, indent=2))
@@ -518,6 +605,10 @@ def main() -> None:
         return
 
     result = post_messages(messages)
+    result["fetched"] = len(messages)
+    result["lookbackMinutes"] = lookback_minutes
+    result["mailTop"] = top
+    result["mailScanTop"] = scan_top
     print(json.dumps(result, ensure_ascii=False))
 
 
