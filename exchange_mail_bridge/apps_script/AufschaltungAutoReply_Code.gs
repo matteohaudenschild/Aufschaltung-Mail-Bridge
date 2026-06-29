@@ -26,7 +26,7 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
     "Michael.Elsner@sicherheit-nord.de",
     "Dennis.Gessert@sicherheit-nord.de"
   ],
-  INTERNAL_COPY_SEND_MODE: "bcc",
+  INTERNAL_COPY_SEND_MODE: "cc",
   SENDER_NAME: "Sicherheit Nord",
   FROM_ALIAS: "aufschaltungen.berlin@sicherheit-nord.de",
   REPLY_TO_EMAIL: "aufschaltungen.berlin@sicherheit-nord.de",
