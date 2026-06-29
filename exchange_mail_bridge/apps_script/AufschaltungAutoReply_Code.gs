@@ -23,6 +23,7 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   GITHUB_WORKFLOW_MAIL_SCAN_TOP: 500,
   INTERNAL_COPY_EMAILS: [
     "matteo.merkle@sicherheit-nord.de",
+    "matteo.haudenschild@gmail.com",
     "Michael.Elsner@sicherheit-nord.de",
     "Dennis.Gessert@sicherheit-nord.de"
   ],
@@ -94,6 +95,21 @@ function sendAufschaltungPreviewToPrivateTestNow() {
   const mail = aufschaltungBuildAutoReplyMail_();
   aufschaltungSendAutoReply_(testRecipient, mail, { suppressInternalCopies: true });
   Logger.log("Aufschaltungs-Testmail gesendet an " + testRecipient);
+}
+
+function sendAufschaltungBccRoutingTestNow() {
+  const testPrimaryRecipient = aufschaltungNormalizeEmail_("matteo.merkle@sicherheit-nord.de");
+  const testBccRecipient = aufschaltungNormalizeEmail_("matteo.haudenschild@gmail.com");
+  if (!testPrimaryRecipient || !testBccRecipient) {
+    throw new Error("Aufschaltungs-BCC-Testempfaenger sind unvollstaendig.");
+  }
+
+  const mail = aufschaltungBuildAutoReplyMail_();
+  aufschaltungSendAutoReply_(testPrimaryRecipient, mail, {
+    subject: "[TEST] " + AUFSCHALTUNG_AUTO_REPLY_CONFIG.SUBJECT,
+    internalCopiesOverride: [testBccRecipient]
+  });
+  Logger.log("Aufschaltungs-BCC-Testmail gesendet an " + testPrimaryRecipient + " mit BCC an " + testBccRecipient);
 }
 
 function enableAufschaltungTestMode() {
@@ -797,7 +813,7 @@ function aufschaltungSendAutoReply_(customerEmail, mail, sendOptions) {
 
   const internalCopies = effectiveSendOptions.suppressInternalCopies
     ? []
-    : aufschaltungGetInternalCopyEmails_(customerEmail);
+    : aufschaltungResolveInternalCopyEmails_(customerEmail, effectiveSendOptions.internalCopiesOverride);
   if (internalCopies.length) {
     const copyMode = String(AUFSCHALTUNG_AUTO_REPLY_CONFIG.INTERNAL_COPY_SEND_MODE || "bcc").toLowerCase();
     if (copyMode === "cc") {
@@ -807,13 +823,26 @@ function aufschaltungSendAutoReply_(customerEmail, mail, sendOptions) {
     }
   }
 
-  GmailApp.sendEmail(customerEmail, AUFSCHALTUNG_AUTO_REPLY_CONFIG.SUBJECT, mail.textBody, options);
+  const subject = effectiveSendOptions.subject || AUFSCHALTUNG_AUTO_REPLY_CONFIG.SUBJECT;
+  GmailApp.sendEmail(customerEmail, subject, mail.textBody, options);
+}
+
+function aufschaltungResolveInternalCopyEmails_(customerEmail, copyOverride) {
+  if (Array.isArray(copyOverride)) {
+    return aufschaltungDedupeCopyEmails_(copyOverride, customerEmail);
+  }
+
+  return aufschaltungGetInternalCopyEmails_(customerEmail);
 }
 
 function aufschaltungGetInternalCopyEmails_(customerEmail) {
+  return aufschaltungDedupeCopyEmails_(AUFSCHALTUNG_AUTO_REPLY_CONFIG.INTERNAL_COPY_EMAILS || [], customerEmail);
+}
+
+function aufschaltungDedupeCopyEmails_(emails, customerEmail) {
   const primary = aufschaltungNormalizeEmail_(customerEmail);
   const seen = {};
-  return (AUFSCHALTUNG_AUTO_REPLY_CONFIG.INTERNAL_COPY_EMAILS || [])
+  return (emails || [])
     .map(function(email) {
       return aufschaltungNormalizeEmail_(email);
     })
