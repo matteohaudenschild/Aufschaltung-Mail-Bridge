@@ -22,9 +22,7 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   GITHUB_WORKFLOW_MAIL_TOP: 50,
   GITHUB_WORKFLOW_MAIL_SCAN_TOP: 500,
   INTERNAL_COPY_EMAILS: [
-    "matteo.merkle@sicherheit-nord.de",
-    "Michael.Elsner@sicherheit-nord.de",
-    "Dennis.Gessert@sicherheit-nord.de"
+    "matteo.merkle@sicherheit-nord.de"
   ],
   INTERNAL_COPY_SEND_MODE: "bcc",
   SENDER_NAME: "Sicherheit Nord",
@@ -709,7 +707,7 @@ function aufschaltungIsAllowedRecipient_(email) {
   const local = parts[0];
   const domain = parts[1];
 
-  if (AUFSCHALTUNG_AUTO_REPLY_CONFIG.INTERNAL_DOMAINS.indexOf(domain) !== -1) {
+  if (false && AUFSCHALTUNG_AUTO_REPLY_CONFIG.INTERNAL_DOMAINS.indexOf(domain) !== -1) {
     return false;
   }
 
@@ -762,8 +760,8 @@ function aufschaltungBuildAutoReplyMail_() {
     '<p style="margin:0 0 18px;color:#22384f;font-size:15px;line-height:1.65;">Für die weitere Bearbeitung öffnen Sie bitte das Aufschaltformular über den folgenden Button.</p>',
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 18px;">',
     "<tr>",
-    '<td align="center" bgcolor="#0a84ff" style="border-radius:999px;box-shadow:0 10px 20px rgba(10,132,255,0.24);">',
-    '<a href="' + AUFSCHALTUNG_AUTO_REPLY_CONFIG.FORM_LINK + '" style="display:inline-block;padding:13px 22px;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;">Zum Aufschaltformular</a>',
+    '<td align="center" bgcolor="#0a84ff" style="padding:13px 22px;border-radius:999px;background-color:#0a84ff;">',
+    '<a href="' + AUFSCHALTUNG_AUTO_REPLY_CONFIG.FORM_LINK + '" style="display:block;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;"><font color="#ffffff"><strong>Zum Aufschaltformular</strong></font></a>',
     "</td>",
     "</tr>",
     "</table>",
@@ -1027,8 +1025,8 @@ function aufschaltungBridgeIsRequest_(e) {
 }
 
 function aufschaltungBridgeDoPost_(e) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  let lock;
+  let lockAcquired = false;
 
   try {
     const props = PropertiesService.getScriptProperties();
@@ -1051,11 +1049,23 @@ function aufschaltungBridgeDoPost_(e) {
       }, 401);
     }
 
+    lock = LockService.getScriptLock();
+    lockAcquired = lock.tryLock(1000);
+    if (!lockAcquired) {
+      return aufschaltungBridgeJsonResponse_({
+        ok: false,
+        transient: true,
+        error: "script_busy",
+        retryAfterSeconds: 5
+      }, 503);
+    }
+
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
     const sheet = aufschaltungBridgeGetOrCreateSheet_(sheetId, sheetName);
     const headers = aufschaltungBridgeEnsureHeader_(sheet);
     const columns = aufschaltungBridgeColumnMap_(headers);
     const existingRows = aufschaltungBridgeExistingIdRows_(sheet);
+    const seenMessageIds = new Set();
     const now = new Date().toISOString();
     const rows = [];
     const updates = [];
@@ -1069,40 +1079,51 @@ function aufschaltungBridgeDoPost_(e) {
         return;
       }
 
+      if (seenMessageIds.has(messageId)) {
+        skipped += 1;
+        return;
+      }
+      seenMessageIds.add(messageId);
+
       const rowNumber = existingRows.get(messageId);
-      const existingAttachmentLinks = rowNumber && columns.AttachmentLinks
-        ? aufschaltungBridgeClean_(sheet.getRange(rowNumber, columns.AttachmentLinks).getValue())
-        : "";
-      const hasStaleAttachmentLinks = Boolean(existingAttachmentLinks) && !aufschaltungBridgeValidLinks_(existingAttachmentLinks);
-      const savedAttachmentLinks = hasStaleAttachmentLinks ? "" : existingAttachmentLinks;
-      const attachmentLinks = savedAttachmentLinks || aufschaltungBridgeSaveAttachments_(message, props);
-      const existingBodyHtmlLink = rowNumber && columns.BodyHtmlLink
-        ? aufschaltungBridgeClean_(sheet.getRange(rowNumber, columns.BodyHtmlLink).getValue())
-        : "";
-      const hasStaleBodyHtmlLink = Boolean(existingBodyHtmlLink) && !aufschaltungBridgeValidLinks_(existingBodyHtmlLink);
-      const savedBodyHtmlLink = hasStaleBodyHtmlLink ? "" : existingBodyHtmlLink;
-      const bodyHtmlLink = savedBodyHtmlLink || aufschaltungBridgeSaveBodyHtml_(message, props);
-      const row = aufschaltungBridgeBuildRow_(message, attachmentLinks, bodyHtmlLink, now);
 
       if (rowNumber) {
-        if (
-          aufschaltungBridgeHasEnrichment_(message)
-          || attachmentLinks
-          || bodyHtmlLink
-          || hasStaleAttachmentLinks
-          || hasStaleBodyHtmlLink
-        ) {
-          updates.push({
-            rowNumber: rowNumber,
-            row: row
-          });
-          updated += 1;
-        } else {
+        const existingAttachmentLinks = columns.AttachmentLinks
+          ? aufschaltungBridgeClean_(sheet.getRange(rowNumber, columns.AttachmentLinks).getValue())
+          : "";
+        const existingBodyHtmlLink = columns.BodyHtmlLink
+          ? aufschaltungBridgeClean_(sheet.getRange(rowNumber, columns.BodyHtmlLink).getValue())
+          : "";
+        const canRepairAttachmentLinks = aufschaltungBridgeHasSavableAttachments_(message);
+        const canRepairBodyHtmlLink = aufschaltungBridgeHasSavableBodyHtml_(message);
+        const needsAttachmentLinkRepair = canRepairAttachmentLinks
+          && !aufschaltungBridgeValidLinks_(existingAttachmentLinks);
+        const needsBodyHtmlLinkRepair = canRepairBodyHtmlLink
+          && !aufschaltungBridgeValidLinks_(existingBodyHtmlLink);
+
+        if (!needsAttachmentLinkRepair && !needsBodyHtmlLinkRepair) {
           skipped += 1;
+          return;
         }
+
+        const attachmentLinks = needsAttachmentLinkRepair
+          ? aufschaltungBridgeSaveAttachments_(message, props)
+          : existingAttachmentLinks;
+        const bodyHtmlLink = needsBodyHtmlLinkRepair
+          ? aufschaltungBridgeSaveBodyHtml_(message, props)
+          : existingBodyHtmlLink;
+        const row = aufschaltungBridgeBuildRow_(message, attachmentLinks, bodyHtmlLink, now);
+        updates.push({
+          rowNumber: rowNumber,
+          row: row
+        });
+        updated += 1;
         return;
       }
 
+      const attachmentLinks = aufschaltungBridgeSaveAttachments_(message, props);
+      const bodyHtmlLink = aufschaltungBridgeSaveBodyHtml_(message, props);
+      const row = aufschaltungBridgeBuildRow_(message, attachmentLinks, bodyHtmlLink, now);
       existingRows.set(messageId, sheet.getLastRow() + rows.length + 1);
       rows.push(row);
     });
@@ -1115,33 +1136,11 @@ function aufschaltungBridgeDoPost_(e) {
       sheet.getRange(update.rowNumber, 1, 1, update.row.length).setValues([update.row]);
     });
 
-    let autoReply = {
-      triggered: false
-    };
-
-    if (rows.length > 0 || updated > 0) {
-      try {
-        autoReply = Object.assign(
-          {
-            triggered: true
-          },
-          processAufschaltungExchangeSheetAutoReplies_()
-        );
-      } catch (autoReplyError) {
-        autoReply = {
-          triggered: true,
-          ok: false,
-          error: String(autoReplyError && autoReplyError.message ? autoReplyError.message : autoReplyError)
-        };
-      }
-    }
-
     return aufschaltungBridgeJsonResponse_({
       ok: true,
       appended: rows.length,
       updated: updated,
-      skipped: skipped,
-      autoReply: autoReply
+      skipped: skipped
     });
   } catch (error) {
     return aufschaltungBridgeJsonResponse_({
@@ -1149,7 +1148,9 @@ function aufschaltungBridgeDoPost_(e) {
       error: String(error && error.message ? error.message : error)
     }, 500);
   } finally {
-    lock.releaseLock();
+    if (lockAcquired) {
+      lock.releaseLock();
+    }
   }
 }
 
@@ -1194,7 +1195,12 @@ function aufschaltungBridgeEnsureHeader_(sheet) {
 
   const current = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
   if (current[0] === "MessageId") {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    const needsHeaderRepair = headers.some(function(header, index) {
+      return current[index] !== header;
+    });
+    if (needsHeaderRepair) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    }
     sheet.setFrozenRows(1);
     return headers;
   }
@@ -1259,16 +1265,15 @@ function aufschaltungBridgeBuildRow_(message, attachmentLinks, bodyHtmlLink, imp
   ];
 }
 
-function aufschaltungBridgeHasEnrichment_(message) {
+function aufschaltungBridgeHasSavableAttachments_(message) {
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-  const bodyImageUrls = Array.isArray(message.bodyImageUrls) ? message.bodyImageUrls : [];
-  const bodyLinks = Array.isArray(message.bodyLinks) ? message.bodyLinks : [];
-  return attachments.length > 0
-    || bodyImageUrls.length > 0
-    || bodyLinks.length > 0
-    || Boolean(message.bodyHtml)
-    || Boolean(message.bodyTextFull)
-    || Number(message.attachmentCount || 0) > 0;
+  return attachments.some(function(attachment) {
+    return Boolean(attachment && attachment.base64);
+  });
+}
+
+function aufschaltungBridgeHasSavableBodyHtml_(message) {
+  return Boolean(aufschaltungBridgeCleanLarge_(message.bodyHtml, 200000));
 }
 
 function aufschaltungBridgeSaveAttachments_(message, props) {
@@ -1318,7 +1323,8 @@ function aufschaltungBridgeValidLinks_(value) {
   if (!text) {
     return false;
   }
-  return text.split(/\s+/).some(function(part) {
+  const links = text.split(/\s+/).filter(Boolean);
+  return links.length > 0 && links.every(function(part) {
     return /^https?:\/\//i.test(part);
   });
 }
