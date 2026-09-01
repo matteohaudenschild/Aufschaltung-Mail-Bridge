@@ -22,9 +22,7 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   GITHUB_WORKFLOW_MAIL_TOP: 50,
   GITHUB_WORKFLOW_MAIL_SCAN_TOP: 500,
   INTERNAL_COPY_EMAILS: [
-    "matteo.merkle@sicherheit-nord.de",
-    "Michael.Elsner@sicherheit-nord.de",
-    "Dennis.Gessert@sicherheit-nord.de"
+    "matteo.merkle@sicherheit-nord.de"
   ],
   INTERNAL_COPY_SEND_MODE: "bcc",
   SENDER_NAME: "Sicherheit Nord",
@@ -709,7 +707,7 @@ function aufschaltungIsAllowedRecipient_(email) {
   const local = parts[0];
   const domain = parts[1];
 
-  if (AUFSCHALTUNG_AUTO_REPLY_CONFIG.INTERNAL_DOMAINS.indexOf(domain) !== -1) {
+  if (false && AUFSCHALTUNG_AUTO_REPLY_CONFIG.INTERNAL_DOMAINS.indexOf(domain) !== -1) {
     return false;
   }
 
@@ -762,8 +760,8 @@ function aufschaltungBuildAutoReplyMail_() {
     '<p style="margin:0 0 18px;color:#22384f;font-size:15px;line-height:1.65;">Für die weitere Bearbeitung öffnen Sie bitte das Aufschaltformular über den folgenden Button.</p>',
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 18px;">',
     "<tr>",
-    '<td align="center" bgcolor="#0a84ff" style="border-radius:999px;box-shadow:0 10px 20px rgba(10,132,255,0.24);">',
-    '<a href="' + AUFSCHALTUNG_AUTO_REPLY_CONFIG.FORM_LINK + '" style="display:inline-block;padding:13px 22px;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;">Zum Aufschaltformular</a>',
+    '<td align="center" bgcolor="#0a84ff" style="padding:13px 22px;border-radius:999px;background-color:#0a84ff;">',
+    '<a href="' + AUFSCHALTUNG_AUTO_REPLY_CONFIG.FORM_LINK + '" style="display:block;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;"><font color="#ffffff"><strong>Zum Aufschaltformular</strong></font></a>',
     "</td>",
     "</tr>",
     "</table>",
