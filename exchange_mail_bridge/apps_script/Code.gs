@@ -11,8 +11,8 @@ function doGet() {
 }
 
 function doPost(e) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  let lock;
+  let lockAcquired = false;
 
   try {
     const props = PropertiesService.getScriptProperties();
@@ -29,12 +29,24 @@ function doPost(e) {
       return jsonResponse({ ok: false, error: 'Unauthorized.' }, 401);
     }
 
+    lock = LockService.getScriptLock();
+    lockAcquired = lock.tryLock(1000);
+    if (!lockAcquired) {
+      return jsonResponse({
+        ok: false,
+        transient: true,
+        error: 'script_busy',
+        retryAfterSeconds: 5
+      }, 503);
+    }
+
     const messages = Array.isArray(payload.messages) ? payload.messages : [];
     const sheet = getOrCreateSheet_(sheetId, sheetName);
     const headers = ensureHeader_(sheet);
     const columns = getColumnMap_(headers);
 
     const existingRows = getExistingIdRows_(sheet);
+    const seenMessageIds = new Set();
     const now = new Date().toISOString();
     const rows = [];
     const updates = [];
@@ -48,31 +60,48 @@ function doPost(e) {
         return;
       }
 
+      if (seenMessageIds.has(messageId)) {
+        skipped += 1;
+        return;
+      }
+      seenMessageIds.add(messageId);
+
       const rowNumber = existingRows.get(messageId);
-      const existingAttachmentLinks = rowNumber && columns.AttachmentLinks
-        ? clean_(sheet.getRange(rowNumber, columns.AttachmentLinks).getValue())
-        : '';
-      const hasStaleAttachmentLinks = Boolean(existingAttachmentLinks) && !validAttachmentLinks_(existingAttachmentLinks);
-      const savedAttachmentLinks = hasStaleAttachmentLinks ? '' : existingAttachmentLinks;
-      const attachmentLinks = savedAttachmentLinks || saveAttachments_(message, props);
-      const existingBodyHtmlLink = rowNumber && columns.BodyHtmlLink
-        ? clean_(sheet.getRange(rowNumber, columns.BodyHtmlLink).getValue())
-        : '';
-      const hasStaleBodyHtmlLink = Boolean(existingBodyHtmlLink) && !validAttachmentLinks_(existingBodyHtmlLink);
-      const savedBodyHtmlLink = hasStaleBodyHtmlLink ? '' : existingBodyHtmlLink;
-      const bodyHtmlLink = savedBodyHtmlLink || saveBodyHtml_(message, props);
-      const row = buildRow_(message, attachmentLinks, bodyHtmlLink, now);
 
       if (rowNumber) {
-        if (hasEnrichment_(message) || attachmentLinks || bodyHtmlLink || hasStaleAttachmentLinks || hasStaleBodyHtmlLink) {
-          updates.push({ rowNumber, row });
-          updated += 1;
-        } else {
+        const existingAttachmentLinks = columns.AttachmentLinks
+          ? clean_(sheet.getRange(rowNumber, columns.AttachmentLinks).getValue())
+          : '';
+        const existingBodyHtmlLink = columns.BodyHtmlLink
+          ? clean_(sheet.getRange(rowNumber, columns.BodyHtmlLink).getValue())
+          : '';
+        const canRepairAttachmentLinks = hasSavableAttachments_(message);
+        const canRepairBodyHtmlLink = hasSavableBodyHtml_(message);
+        const needsAttachmentLinkRepair = canRepairAttachmentLinks
+          && !validAttachmentLinks_(existingAttachmentLinks);
+        const needsBodyHtmlLinkRepair = canRepairBodyHtmlLink
+          && !validAttachmentLinks_(existingBodyHtmlLink);
+
+        if (!needsAttachmentLinkRepair && !needsBodyHtmlLinkRepair) {
           skipped += 1;
+          return;
         }
+
+        const attachmentLinks = needsAttachmentLinkRepair
+          ? saveAttachments_(message, props)
+          : existingAttachmentLinks;
+        const bodyHtmlLink = needsBodyHtmlLinkRepair
+          ? saveBodyHtml_(message, props)
+          : existingBodyHtmlLink;
+        const row = buildRow_(message, attachmentLinks, bodyHtmlLink, now);
+        updates.push({ rowNumber, row });
+        updated += 1;
         return;
       }
 
+      const attachmentLinks = saveAttachments_(message, props);
+      const bodyHtmlLink = saveBodyHtml_(message, props);
+      const row = buildRow_(message, attachmentLinks, bodyHtmlLink, now);
       existingRows.set(messageId, sheet.getLastRow() + rows.length + 1);
       rows.push(row);
     });
@@ -89,7 +118,9 @@ function doPost(e) {
   } catch (error) {
     return jsonResponse({ ok: false, error: String(error && error.message ? error.message : error) }, 500);
   } finally {
-    lock.releaseLock();
+    if (lockAcquired) {
+      lock.releaseLock();
+    }
   }
 }
 
@@ -149,7 +180,10 @@ function ensureHeader_(sheet) {
 
   const current = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
   if (current[0] === 'MessageId') {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    const needsHeaderRepair = headers.some((header, index) => current[index] !== header);
+    if (needsHeaderRepair) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    }
     sheet.setFrozenRows(1);
     return headers;
   }
@@ -210,16 +244,13 @@ function buildRow_(message, attachmentLinks, bodyHtmlLink, importedAt) {
   ];
 }
 
-function hasEnrichment_(message) {
+function hasSavableAttachments_(message) {
   const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-  const bodyImageUrls = Array.isArray(message.bodyImageUrls) ? message.bodyImageUrls : [];
-  const bodyLinks = Array.isArray(message.bodyLinks) ? message.bodyLinks : [];
-  return attachments.length > 0
-    || bodyImageUrls.length > 0
-    || bodyLinks.length > 0
-    || Boolean(message.bodyHtml)
-    || Boolean(message.bodyTextFull)
-    || Number(message.attachmentCount || 0) > 0;
+  return attachments.some((attachment) => Boolean(attachment && attachment.base64));
+}
+
+function hasSavableBodyHtml_(message) {
+  return Boolean(cleanLarge_(message.bodyHtml, 200000));
 }
 
 function saveAttachments_(message, props) {
@@ -269,7 +300,8 @@ function validAttachmentLinks_(value) {
   if (!text) {
     return false;
   }
-  return text.split(/\s+/).some((part) => /^https?:\/\//i.test(part));
+  const links = text.split(/\s+/).filter(Boolean);
+  return links.length > 0 && links.every((part) => /^https?:\/\//i.test(part));
 }
 
 function getOrCreateDriveFolder_(folderName) {

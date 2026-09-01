@@ -1,0 +1,44 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: exchange_mail_bridge/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r exchange_mail_bridge/requirements.txt
+
+      - name: Compile Python
+        run: python -m py_compile exchange_mail_bridge/exchange_to_apps_script.py tests/test_exchange_to_apps_script.py
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Check Apps Script syntax
+        run: |
+          node -e "new Function(require('fs').readFileSync(process.argv[1], 'utf8'))" exchange_mail_bridge/apps_script/Code.gs
+          node -e "new Function(require('fs').readFileSync(process.argv[1], 'utf8'))" exchange_mail_bridge/apps_script/AufschaltungAutoReply_Code.gs
+
+      - name: Run Apps Script ingestion tests
+        run: node tests/test_apps_script_ingestion.js

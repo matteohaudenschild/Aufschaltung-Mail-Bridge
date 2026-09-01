@@ -51,7 +51,7 @@ APPS_SCRIPT_WEBAPP_URL=<Apps Script /exec URL>
 BRIDGE_TOKEN=<same token as Apps Script>
 ```
 
-Run the workflow once manually from GitHub Actions. After that it runs roughly every 10 minutes. GitHub scheduled workflows can be delayed, so this is near-real-time, not instant.
+Run the workflow once manually from GitHub Actions. In the Aufschaltung setup, Apps Script dispatches it every five minutes. The GitHub cron runs hourly at minute 17 as a fallback. Scheduled workflows can be delayed, so this is near-real-time, not instant.
 
 ## Local smoke test
 

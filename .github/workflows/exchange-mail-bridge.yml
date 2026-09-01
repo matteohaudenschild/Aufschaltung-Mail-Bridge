@@ -36,7 +36,7 @@ on:
         required: false
         default: "false"
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "17 * * * *"
 
 concurrency:
   group: exchange-mail-bridge
@@ -45,7 +45,7 @@ concurrency:
 jobs:
   sync-mail:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       EWS_URL: ${{ secrets.EWS_URL }}
       EWS_EMAIL: ${{ secrets.EWS_EMAIL }}
@@ -69,6 +69,11 @@ jobs:
       EWS_FETCH_RETRIES: "4"
       EWS_FETCH_RETRY_DELAY_SECONDS: "20"
       EWS_TRANSIENT_FAILURE_EXIT_ZERO: "true"
+      APPS_SCRIPT_POST_ATTEMPTS: "4"
+      APPS_SCRIPT_CONNECT_TIMEOUT_SECONDS: "10"
+      APPS_SCRIPT_READ_TIMEOUT_SECONDS: "45"
+      APPS_SCRIPT_RETRY_BASE_DELAY_SECONDS: "5"
+      APPS_SCRIPT_RETRY_JITTER_SECONDS: "1"
 
     steps:
       - name: Check out repository
