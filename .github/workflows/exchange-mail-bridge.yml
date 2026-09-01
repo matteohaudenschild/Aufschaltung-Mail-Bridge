@@ -53,7 +53,7 @@ jobs:
       EWS_PASSWORD: ${{ secrets.EWS_PASSWORD }}
       EWS_AUTH_TYPE: ${{ secrets.EWS_AUTH_TYPE }}
       EWS_VERIFY_TLS: ${{ secrets.EWS_VERIFY_TLS }}
-      APPS_SCRIPT_WEBAPP_URL: ${{ secrets.APPS_SCRIPT_WEBAPP_URL }}
+      APPS_SCRIPT_WEBAPP_URL: ${{ secrets.APPS_SCRIPT_WEBAPP_URL_V25 || secrets.APPS_SCRIPT_WEBAPP_URL }}
       BRIDGE_TOKEN: ${{ secrets.BRIDGE_TOKEN }}
       MAIL_LOOKBACK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.lookback_minutes || '1440' }}
       MAIL_TOP: ${{ github.event_name == 'workflow_dispatch' && inputs.mail_top || '50' }}
