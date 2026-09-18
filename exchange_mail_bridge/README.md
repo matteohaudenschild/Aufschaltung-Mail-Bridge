@@ -53,6 +53,8 @@ BRIDGE_TOKEN=<same token as Apps Script>
 
 Run the workflow once manually from GitHub Actions. In the Aufschaltung setup, Apps Script dispatches it every five minutes. The GitHub cron runs hourly at minute 17 as a fallback. Scheduled workflows can be delayed, so this is near-real-time, not instant.
 
+The five-minute Apps Script dispatch scans the last 60 minutes. The hourly GitHub fallback scans the last 24 hours. Exhausted retries for explicitly transient Google responses are deferred only when the automated Apps Script dispatch sets `defer_transient_failures=true`, because the next overlapping, MessageId-idempotent poll can safely retry them. Manual runs default to strict handling, and the hourly fallback is also configured as strict, so authentication, configuration, and other non-transient failures still turn the workflow red.
+
 ## Local smoke test
 
 Create a local `.env` from `.env.example`, then run:

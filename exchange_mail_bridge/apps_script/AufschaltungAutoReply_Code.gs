@@ -18,7 +18,7 @@ const AUFSCHALTUNG_AUTO_REPLY_CONFIG = {
   GITHUB_WORKFLOW_REF: "master",
   GITHUB_WORKFLOW_TRIGGER_INTERVAL_MINUTES: 5,
   GITHUB_WORKFLOW_MIN_DISPATCH_INTERVAL_MINUTES: 4,
-  GITHUB_WORKFLOW_LOOKBACK_MINUTES: 1440,
+  GITHUB_WORKFLOW_LOOKBACK_MINUTES: 60,
   GITHUB_WORKFLOW_MAIL_TOP: 50,
   GITHUB_WORKFLOW_MAIL_SCAN_TOP: 500,
   INTERNAL_COPY_EMAILS: [
@@ -193,7 +193,8 @@ function triggerAufschaltungExchangeMailBridgeWorkflow() {
         mail_scan_top: String(AUFSCHALTUNG_AUTO_REPLY_CONFIG.GITHUB_WORKFLOW_MAIL_SCAN_TOP),
         include_attachments: "true",
         include_body_html: "true",
-        dry_run_summary: "false"
+        dry_run_summary: "false",
+        defer_transient_failures: "true"
       }
     }),
     muteHttpExceptions: true

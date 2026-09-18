@@ -36,6 +36,14 @@ DEFAULT_AUFSCHALTUNG_INCLUDE_REGEX = (
 T = TypeVar("T")
 
 
+class AppsScriptTransientError(RuntimeError):
+    """Known temporary Apps Script failure after all bounded retries."""
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 def env(name: str, default: str = "") -> str:
     value = os.environ.get(name)
     if value is None or not value.strip():
@@ -632,8 +640,9 @@ def post_apps_script_batch(payload: Dict[str, Any]) -> Dict[str, Any]:
                     jitter=jitter,
                 )
                 continue
-            raise RuntimeError(
-                f"Apps Script request failed after {attempts} attempt(s): {reason}."
+            raise AppsScriptTransientError(
+                f"Apps Script request failed after {attempts} attempt(s): {reason}.",
+                reason=reason,
             ) from None
         except requests.RequestException:
             # Exception strings from requests often contain the complete request URL.
@@ -655,9 +664,10 @@ def post_apps_script_batch(payload: Dict[str, Any]) -> Dict[str, Any]:
                     final_host=final_host,
                 )
                 continue
-            raise RuntimeError(
+            raise AppsScriptTransientError(
                 f"Apps Script returned retryable HTTP {status_code} after "
-                f"{attempts} attempt(s)."
+                f"{attempts} attempt(s).",
+                reason="http_status",
             )
 
         if not 200 <= status_code < 300:
@@ -678,8 +688,9 @@ def post_apps_script_batch(payload: Dict[str, Any]) -> Dict[str, Any]:
                     final_host=final_host,
                 )
                 continue
-            raise RuntimeError(
-                f"Apps Script returned an empty response after {attempts} attempt(s)."
+            raise AppsScriptTransientError(
+                f"Apps Script returned an empty response after {attempts} attempt(s).",
+                reason="empty_response",
             )
 
         try:
@@ -696,8 +707,9 @@ def post_apps_script_batch(payload: Dict[str, Any]) -> Dict[str, Any]:
                     final_host=final_host,
                 )
                 continue
-            raise RuntimeError(
-                f"Apps Script returned a non-JSON response after {attempts} attempt(s)."
+            raise AppsScriptTransientError(
+                f"Apps Script returned a non-JSON response after {attempts} attempt(s).",
+                reason="non_json_response",
             ) from None
 
         if not isinstance(batch_result, dict):
@@ -712,8 +724,9 @@ def post_apps_script_batch(payload: Dict[str, Any]) -> Dict[str, Any]:
                     final_host=final_host,
                 )
                 continue
-            raise RuntimeError(
-                f"Apps Script returned an invalid JSON response after {attempts} attempt(s)."
+            raise AppsScriptTransientError(
+                f"Apps Script returned an invalid JSON response after {attempts} attempt(s).",
+                reason="invalid_json_response",
             )
 
         # Apps Script Web Apps cannot reliably choose the HTTP status code. They can still
@@ -740,6 +753,10 @@ def post_apps_script_batch(payload: Dict[str, Any]) -> Dict[str, Any]:
                     final_host=final_host,
                 )
                 continue
+            raise AppsScriptTransientError(
+                f"Apps Script remained temporarily unavailable after {attempts} attempt(s).",
+                reason="apps_script_transient_response",
+            )
 
         return batch_result
 
@@ -853,7 +870,38 @@ def main() -> None:
         print(json.dumps({"messages": redact_attachment_payloads(messages)}, ensure_ascii=False, indent=2))
         return
 
-    result = post_messages(messages)
+    try:
+        result = post_messages(messages)
+    except AppsScriptTransientError as exc:
+        if not parse_bool(
+            env("APPS_SCRIPT_TRANSIENT_FAILURE_EXIT_ZERO"),
+            default=False,
+        ):
+            raise
+
+        print(
+            "::warning title=Temporary Apps Script outage::"
+            "The bridge exhausted its bounded retries. "
+            "This run is deferred to the next idempotent poll."
+        )
+        print(json.dumps({
+            "ok": True,
+            "deferred": True,
+            "stage": "apps_script_post",
+            "reason": exc.reason,
+            "error": safe_error(exc),
+            "fetched": len(messages),
+            "lookbackMinutes": lookback_minutes,
+            "mailTop": top,
+            "mailScanTop": scan_top,
+            "note": (
+                "Apps Script remained temporarily unavailable after bounded retries. "
+                "The next scheduled run re-reads an overlapping lookback window; "
+                "MessageId idempotency makes that retry safe."
+            ),
+        }, ensure_ascii=False))
+        return
+
     result["fetched"] = len(messages)
     result["lookbackMinutes"] = lookback_minutes
     result["mailTop"] = top

@@ -102,6 +102,8 @@ class AppsScriptPostRetryTests(unittest.TestCase):
         self.assertNotIn("bridge-token-secret", combined_output)
         self.assertNotIn("confidential-mail-body", combined_output)
         self.assertIn("after 2 attempt(s): timeout", str(raised.exception))
+        self.assertIsInstance(raised.exception, bridge.AppsScriptTransientError)
+        self.assertEqual(raised.exception.reason, "timeout")
 
     def test_interrupted_chunked_response_retries_then_succeeds(self):
         interrupted = bridge.requests.exceptions.ChunkedEncodingError(
@@ -273,6 +275,36 @@ class AppsScriptPostRetryTests(unittest.TestCase):
         self.assertEqual(request.call_count, 2)
         self.assertNotIn("confidential-mail-body", output.getvalue())
 
+    def test_exhausted_google_edge_responses_are_typed_as_transient(self):
+        os.environ["APPS_SCRIPT_POST_ATTEMPTS"] = "1"
+        cases = [
+            (
+                "googleusercontent_404",
+                response(status=404),
+                "http_status",
+            ),
+            (
+                "non_json_200",
+                response(
+                    status=200,
+                    content=b"<html>temporary error</html>",
+                    json_error=ValueError("temporary HTML"),
+                ),
+                "non_json_response",
+            ),
+        ]
+
+        for name, transient_response, expected_reason in cases:
+            with self.subTest(name=name), patch.object(
+                bridge.requests,
+                "post",
+                return_value=transient_response,
+            ):
+                with self.assertRaises(bridge.AppsScriptTransientError) as raised:
+                    bridge.post_messages([self.message])
+
+            self.assertEqual(raised.exception.reason, expected_reason)
+
     def test_non_object_json_success_response_retries(self):
         invalid = response(json_data=[{"ok": True}])
 
@@ -357,10 +389,14 @@ class AppsScriptPostRetryTests(unittest.TestCase):
         with patch.object(
             bridge.requests, "post", side_effect=[busy, busy]
         ) as request, redirect_stdout(io.StringIO()):
-            with self.assertRaisesRegex(SystemExit, "ok=false"):
+            with self.assertRaisesRegex(
+                bridge.AppsScriptTransientError,
+                "temporarily unavailable after 2 attempt",
+            ) as raised:
                 bridge.post_messages([self.message])
 
         self.assertEqual(request.call_count, 2)
+        self.assertEqual(raised.exception.reason, "apps_script_transient_response")
 
     def test_unexpected_requests_exception_is_sanitized_without_retry(self):
         unsafe_exception = bridge.requests.RequestException(
@@ -425,6 +461,93 @@ class AppsScriptPostRetryTests(unittest.TestCase):
             result["autoReply"]["details"],
             [{"id": "first"}, {"id": "second"}],
         )
+
+    def test_empty_poll_does_not_call_apps_script(self):
+        with patch.object(bridge.requests, "post") as request:
+            result = bridge.post_messages([])
+
+        request.assert_not_called()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["appended"], 0)
+        self.assertEqual(result["updated"], 0)
+        self.assertEqual(result["skipped"], 0)
+
+    def test_main_defers_exhausted_transient_post_when_enabled(self):
+        os.environ["APPS_SCRIPT_TRANSIENT_FAILURE_EXIT_ZERO"] = "true"
+        args = Mock(dry_run=False, dry_run_summary=False)
+        transient_error = bridge.AppsScriptTransientError(
+            "Apps Script remained temporarily unavailable after 5 attempt(s).",
+            reason="apps_script_transient_response",
+        )
+
+        with patch.object(bridge, "parse_args", return_value=args), patch.object(
+            bridge, "connect_account", return_value=Mock()
+        ), patch.object(
+            bridge,
+            "retry_transient_exchange",
+            return_value=[self.message],
+        ), patch.object(
+            bridge,
+            "post_messages",
+            side_effect=transient_error,
+        ), redirect_stdout(io.StringIO()) as output:
+            bridge.main()
+
+        lines = output.getvalue().strip().splitlines()
+        self.assertIn("::warning title=Temporary Apps Script outage::", lines[0])
+        deferred = bridge.json.loads(lines[-1])
+        self.assertTrue(deferred["ok"])
+        self.assertTrue(deferred["deferred"])
+        self.assertEqual(deferred["stage"], "apps_script_post")
+        self.assertEqual(deferred["reason"], "apps_script_transient_response")
+        self.assertEqual(deferred["fetched"], 1)
+        self.assertNotIn("confidential-mail-body", output.getvalue())
+
+    def test_main_keeps_exhausted_transient_post_strict_by_default(self):
+        args = Mock(dry_run=False, dry_run_summary=False)
+        transient_error = bridge.AppsScriptTransientError(
+            "Apps Script request failed after 5 attempt(s): timeout.",
+            reason="timeout",
+        )
+
+        with patch.object(bridge, "parse_args", return_value=args), patch.object(
+            bridge, "connect_account", return_value=Mock()
+        ), patch.object(
+            bridge,
+            "retry_transient_exchange",
+            return_value=[self.message],
+        ), patch.object(
+            bridge,
+            "post_messages",
+            side_effect=transient_error,
+        ):
+            with self.assertRaises(bridge.AppsScriptTransientError):
+                bridge.main()
+
+    def test_main_never_defers_hard_post_failures(self):
+        os.environ["APPS_SCRIPT_TRANSIENT_FAILURE_EXIT_ZERO"] = "true"
+        args = Mock(dry_run=False, dry_run_summary=False)
+        hard_errors = [
+            RuntimeError("Apps Script returned non-retryable HTTP 401."),
+            SystemExit("Apps Script returned an error response (ok=false)."),
+        ]
+
+        for hard_error in hard_errors:
+            with self.subTest(error_type=type(hard_error).__name__), patch.object(
+                bridge, "parse_args", return_value=args
+            ), patch.object(
+                bridge, "connect_account", return_value=Mock()
+            ), patch.object(
+                bridge,
+                "retry_transient_exchange",
+                return_value=[self.message],
+            ), patch.object(
+                bridge,
+                "post_messages",
+                side_effect=hard_error,
+            ):
+                with self.assertRaises(type(hard_error)):
+                    bridge.main()
 
 
 if __name__ == "__main__":
