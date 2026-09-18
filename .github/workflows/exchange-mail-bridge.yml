@@ -35,6 +35,10 @@ on:
         description: "Only verify Exchange access and print a safe summary; do not post to Apps Script"
         required: false
         default: "false"
+      defer_transient_failures:
+        description: "Treat exhausted, explicitly transient Apps Script failures as deferred to the next poll"
+        required: false
+        default: "false"
   schedule:
     - cron: "17 * * * *"
 
@@ -69,9 +73,10 @@ jobs:
       EWS_FETCH_RETRIES: "4"
       EWS_FETCH_RETRY_DELAY_SECONDS: "20"
       EWS_TRANSIENT_FAILURE_EXIT_ZERO: "true"
-      APPS_SCRIPT_POST_ATTEMPTS: "4"
+      APPS_SCRIPT_TRANSIENT_FAILURE_EXIT_ZERO: ${{ github.event_name == 'workflow_dispatch' && inputs.defer_transient_failures == 'true' && 'true' || 'false' }}
+      APPS_SCRIPT_POST_ATTEMPTS: "5"
       APPS_SCRIPT_CONNECT_TIMEOUT_SECONDS: "10"
-      APPS_SCRIPT_READ_TIMEOUT_SECONDS: "45"
+      APPS_SCRIPT_READ_TIMEOUT_SECONDS: "60"
       APPS_SCRIPT_RETRY_BASE_DELAY_SECONDS: "5"
       APPS_SCRIPT_RETRY_JITTER_SECONDS: "1"
 
@@ -83,6 +88,8 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: exchange_mail_bridge/requirements.txt
 
       - name: Install dependencies
         run: python -m pip install -r exchange_mail_bridge/requirements.txt
